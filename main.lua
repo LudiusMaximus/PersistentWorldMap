@@ -85,13 +85,23 @@ end)
 
 
 -- Shift click the map to reset it!
+local resetMap = false
 WorldMapFrame.ScrollContainer:HookScript("OnMouseDown", function(self)
   if IsShiftKeyDown() then
-    WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer());
-    WorldMapFrame:ResetZoom();
+    WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer())
+    resetMap = true
+  else
+    resetMap = false
   end
 end)
-
+-- Got to do this here as well because otherwise the map of the cursor position gets
+-- loaded when releasing the mouse button.
+WorldMapFrame.ScrollContainer:HookScript("OnMouseUp", function(self)
+  if resetMap then
+    WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer())
+    resetMap = false
+  end
+end)
 
 
 -- Frame to listen to zone change events
