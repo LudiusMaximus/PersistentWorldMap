@@ -87,8 +87,16 @@ end)
 -- Shift click the map to reset it!
 local resetMap = false
 WorldMapFrame.ScrollContainer:HookScript("OnMouseDown", function(self)
+
   if IsShiftKeyDown() then
     WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer())
+    
+    local currentScale = WorldMapFrame.ScrollContainer:GetCanvasScale()
+    local currentZoomLevel = WorldMapFrame.ScrollContainer:GetZoomLevelIndexForScale(currentScale)
+    if currentZoomLevel ~= 1 then
+      WorldMapFrame:ResetZoom()
+    end
+    
     resetMap = true
   else
     resetMap = false
