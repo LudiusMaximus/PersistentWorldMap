@@ -1,8 +1,18 @@
 
+
+local WorldMapFrame = _G.WorldMapFrame
+local MapUtil = _G.MapUtil
+local GetTime = _G.GetTime
+
+
 local lastMapID   = nil
 local lastScale   = nil
 local lastScrollX = nil
 local lastScrollY = nil
+
+-- Only store the last map for a short time.
+local lastMapCloseTime = GetTime()
+local resetMapAfter = 15
 
 -- Store if the last viewed map was the player's current map.
 -- If not we shall only reset the lastMapID when changing to
@@ -46,11 +56,17 @@ local function RestoreMapState()
 end
 
 
+
+
 -- Post hook for ToggleWorldMap to restore map after it is shown.
 -- (Cannot do this with HookScript, because it gets called too early.)
 hooksecurefunc("ToggleWorldMap", function()
   if WorldMapFrame:IsShown() then
-    -- print("Post Hook after showing")
+    -- print("Post Hook after showing", GetTime(), lastMapCloseTime, GetTime() - lastMapCloseTime, resetMapAfter)
+    if GetTime() - lastMapCloseTime > resetMapAfter then
+      lastMapID = nil
+    end
+
     RestoreMapState()
   end
 end)
@@ -62,6 +78,7 @@ end)
 local OtherWorldMapFrameOnHideScripts = WorldMapFrame.ScrollContainer:GetScript("OnHide")
 WorldMapFrame.ScrollContainer:SetScript("OnHide", function(self, ...)
   -- print("Prehook before Hiding")
+  lastMapCloseTime = GetTime()
   SafeMapState()
   OtherWorldMapFrameOnHideScripts(self, ...)
 end)
@@ -84,19 +101,21 @@ end)
 
 
 
+local function ResetMap()
+  WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer())
+  local currentScale = WorldMapFrame.ScrollContainer:GetCanvasScale()
+  local currentZoomLevel = WorldMapFrame.ScrollContainer:GetZoomLevelIndexForScale(currentScale)
+  if currentZoomLevel ~= 1 then
+    WorldMapFrame:ResetZoom()
+  end
+end
+
+
 -- Shift click the map to reset it!
 local resetMap = false
 WorldMapFrame.ScrollContainer:HookScript("OnMouseDown", function(self)
-
   if IsShiftKeyDown() then
-    WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer())
-    
-    local currentScale = WorldMapFrame.ScrollContainer:GetCanvasScale()
-    local currentZoomLevel = WorldMapFrame.ScrollContainer:GetZoomLevelIndexForScale(currentScale)
-    if currentZoomLevel ~= 1 then
-      WorldMapFrame:ResetZoom()
-    end
-    
+    ResetMap()
     resetMap = true
   else
     resetMap = false
@@ -110,6 +129,26 @@ WorldMapFrame.ScrollContainer:HookScript("OnMouseUp", function(self)
     resetMap = false
   end
 end)
+
+
+resetButton = CreateFrame("Button", nil, WorldMapFrame.ScrollContainer, "UIPanelButtonTemplate")
+resetButton:SetPoint("BOTTOMRIGHT", WorldMapFrame.SidePanelToggle.CloseButton, "BOTTOMLEFT", -5, 5)
+resetButton:SetText("Reset View")
+resetButton:SetWidth(120)
+resetButton:SetScript("OnClick", function()
+    ResetMap()
+	end)
+resetButton:Hide()
+
+
+hooksecurefunc(WorldMapFrame, "SetMapID", function(self, mapID)
+    -- print("SetMapID", mapID, MapUtil.GetDisplayableMapForPlayer())
+    if mapID ~= MapUtil.GetDisplayableMapForPlayer() then
+      resetButton:Show()
+    else
+      resetButton:Hide()
+    end
+  end)
 
 
 -- Frame to listen to zone change events
@@ -126,15 +165,23 @@ zoneChangeFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 zoneChangeFrame:SetScript("OnEvent", function(self, event, ...)
   -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil.GetDisplayableMapForPlayer(), lastMapWasCurrentMap)
 
-  -- For small zone changes we are not resetting the map, if the player was previously looking at a different map.
-  if not lastMapWasCurrentMap and event == "ZONE_CHANGED" or event == "ZONE_CHANGED_INDOORS" then
+  if WorldMapFrame:GetMapID() ~= MapUtil.GetDisplayableMapForPlayer() then
+    resetButton:Show()
+  else
+    resetButton:Hide()
+  end
+
+  -- For zone changes we are not resetting the map, if the player was previously looking at a different map.
+  if not lastMapWasCurrentMap and event ~= "PLAYER_ENTERING_WORLD" then
     return
   else
     -- Only reset the map if this zone's map is a different one.
     if lastMapID ~= MapUtil.GetDisplayableMapForPlayer() then
+      -- print("Resetting")
       lastMapID = nil
     end
   end
+
 
 end)
 

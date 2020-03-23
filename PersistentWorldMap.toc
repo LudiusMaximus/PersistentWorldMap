@@ -2,7 +2,7 @@
 ## Title: Persistent World Map
 ## Author: LudiusMaximus
 ## Notes: Maintains the World Map's current zoom and pan when closing and reopening it.
-## Version: 1.2
+## Version: 1.3
 ## X-Donate: PayPal:ludiusmaximus@gmail.com
 ## X-License: The MIT License (MIT)
 
