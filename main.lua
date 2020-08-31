@@ -156,7 +156,7 @@ resetButton:Hide()
   -- else
     -- print("cannot do in combat lockdown")
   -- end
-  
+
 -- end
 
 
@@ -167,17 +167,20 @@ local startupFrame = CreateFrame("Frame")
 startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 startupFrame:SetScript("OnEvent", function()
 
+
   -- Needed for the boss pins to work in combat lockdown.
   if not IsAddOnLoaded("Blizzard_EncounterJournal") then
-    EncounterJournal_LoadUI()  
+    EncounterJournal_LoadUI()
   end
   -- Open once to initialise.
   EncounterJournal_OpenJournal()
-  EncounterJournal:Hide()
+
+  -- If you just do EncounterJournal:Hide(), ESC to open the menu will not
+  -- work right after login.
+  EncounterJournalCloseButton:Click()
+
   -- Otherwise closing EncounterJournal with ESC may not work during combat.
   tinsert(UISpecialFrames, "EncounterJournal")
-  
-  
 end)
 
 
@@ -188,27 +191,31 @@ hooksecurefunc(WorldMapFrame, "SetMapID", function(self, mapID)
     else
       resetButton:Hide()
     end
-    
-    
+
+
     -- Needed for the boss pins to work in combat lockdown.
     if WorldMapFrame.ScrollContainer.Child then
       local kids = { WorldMapFrame.ScrollContainer.Child:GetChildren() };
       for _, v in ipairs(kids) do
         -- print (v.pinTemplate)
-        
-        if v.pinTemplate and v.pinTemplate == "EncounterJournalPinTemplate" then
-          -- print (v.instanceID, v.encounterID)
-          
+
+        if v.pinTemplate and (v.pinTemplate == "EncounterJournalPinTemplate" or v.pinTemplate == "DungeonEntrancePinTemplate") then
+          local instanceID = v.instanceID or v.journalInstanceID
+          local encounterID = v.encounterID
+          -- print (instanceID, encounterID)
+
           local OriginalOnClick = v.OnClick
           v.OnClick = function(...)
             if InCombatLockdown() then
-              EncounterJournal_DisplayInstance(v.instanceID)
-              EncounterJournal_DisplayEncounter(v.encounterID)
-              WorldMapFrame:Hide()
+              EncounterJournal_DisplayInstance(instanceID)
+              if encounterID then EncounterJournal_DisplayEncounter(encounterID) end
               EncounterJournal:Show()
             else
               OriginalOnClick(...)
             end
+
+            -- Mapster prevents the map from closing. Default behaviour is closing though...
+            WorldMapFrame:Hide()
           end
         end
       end
