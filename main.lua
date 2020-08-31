@@ -141,12 +141,77 @@ resetButton:SetScript("OnClick", function()
 resetButton:Hide()
 
 
+
+
+
+
+-- Boss buttons
+-- local ejPinClick = EncounterJournalPinMixin.OnClick
+-- function EncounterJournalPinMixin:OnClick()
+
+  -- print("Tainted stuff")
+
+  -- if not InCombatLockdown() then
+    -- ejPinClick(self)
+  -- else
+    -- print("cannot do in combat lockdown")
+  -- end
+  
+-- end
+
+
+
+
+
+local startupFrame = CreateFrame("Frame")
+startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+startupFrame:SetScript("OnEvent", function()
+
+  -- Needed for the boss pins to work in combat lockdown.
+  if not IsAddOnLoaded("Blizzard_EncounterJournal") then
+    EncounterJournal_LoadUI()  
+  end
+  -- Open once to initialise.
+  EncounterJournal_OpenJournal()
+  EncounterJournal:Hide()
+  -- Otherwise closing EncounterJournal with ESC may not work during combat.
+  tinsert(UISpecialFrames, "EncounterJournal")
+  
+  
+end)
+
+
 hooksecurefunc(WorldMapFrame, "SetMapID", function(self, mapID)
     -- print("SetMapID", mapID, MapUtil.GetDisplayableMapForPlayer())
     if mapID ~= MapUtil.GetDisplayableMapForPlayer() then
       resetButton:Show()
     else
       resetButton:Hide()
+    end
+    
+    
+    -- Needed for the boss pins to work in combat lockdown.
+    if WorldMapFrame.ScrollContainer.Child then
+      local kids = { WorldMapFrame.ScrollContainer.Child:GetChildren() };
+      for _, v in ipairs(kids) do
+        -- print (v.pinTemplate)
+        
+        if v.pinTemplate and v.pinTemplate == "EncounterJournalPinTemplate" then
+          -- print (v.instanceID, v.encounterID)
+          
+          local OriginalOnClick = v.OnClick
+          v.OnClick = function(...)
+            if InCombatLockdown() then
+              EncounterJournal_DisplayInstance(v.instanceID)
+              EncounterJournal_DisplayEncounter(v.encounterID)
+              WorldMapFrame:Hide()
+              EncounterJournal:Show()
+            else
+              OriginalOnClick(...)
+            end
+          end
+        end
+      end
     end
   end)
 
