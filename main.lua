@@ -54,7 +54,8 @@ end
 
 
 -- Post hook for ToggleWorldMap to restore map after it is shown.
--- (Cannot do this with HookScript, because it gets called too early.)
+-- (Cannot do this with WorldMapFrame.ScrollContainer:HookScript("OnShow"),
+-- because it gets called too early.)
 hooksecurefunc("ToggleWorldMap", function()
   if WorldMapFrame:IsShown() then
     -- print("Post Hook after showing", GetTime(), lastMapCloseTime, GetTime() - lastMapCloseTime, resetMapAfter)
@@ -68,8 +69,9 @@ end)
 
 
 -- Pre hook for WorldMapFrame.ScrollContainer OnHide to store map before it is hidden.
--- (Cannot do this by overriding ToggleWorldMap, because then the map is not toggled
--- any more during combat.)
+-- (Cannot do this with HookScript, because then it is called too late.
+-- Also cannot do this in hooksecurefunc of ToggleWorldMap, because then it is not called when
+-- closing the map manually.)
 local OtherWorldMapFrameOnHideScripts = WorldMapFrame.ScrollContainer:GetScript("OnHide")
 WorldMapFrame.ScrollContainer:SetScript("OnHide", function(self, ...)
   -- print("Prehook before Hiding")
@@ -147,7 +149,6 @@ local startupFrame = CreateFrame("Frame")
 startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 startupFrame:SetScript("OnEvent", function()
 
-
   -- Needed for the boss pins to work in combat lockdown.
   if not IsAddOnLoaded("Blizzard_EncounterJournal") then
     EncounterJournal_LoadUI()
@@ -223,15 +224,32 @@ zoneChangeFrame:RegisterEvent("AREA_POIS_UPDATED")
 zoneChangeFrame:SetScript("OnEvent", function(self, event, ...)
   -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil.GetDisplayableMapForPlayer(), lastViewedMapWasCurrentMap)
 
-  if lastViewedMapWasCurrentMap then
-    ResetMap()
-  else
-    if WorldMapFrame:GetMapID() ~= MapUtil.GetDisplayableMapForPlayer() then
-      resetButton:Show()
+  if WorldMapFrame:GetMapID() ~= MapUtil.GetDisplayableMapForPlayer() then
+    if lastViewedMapWasCurrentMap then
+      ResetMap()
     else
-      resetButton:Hide()
+      resetButton:Show()
     end
+  else
+    resetButton:Hide()
   end
 
 end)
+
+
+
+-- Needed to fix taint of newly added quest tracker entries.
+-- Otherwise the map does not open when clicking on these.
+local originalObjectiveTrackerBlockHeader_OnClick = ObjectiveTrackerBlockHeader_OnClick
+ObjectiveTrackerBlockHeader_OnClick = function(...)
+  local _, mouseButton = ...
+
+  -- Only for non-shift left button when in combat lockdown.
+  if not InCombatLockdown() or IsShiftKeyDown() or mouseButton ~= "LeftButton" then
+    return originalObjectiveTrackerBlockHeader_OnClick(...)
+  end
+
+  WorldMapFrame:Show()
+  originalObjectiveTrackerBlockHeader_OnClick(...)
+end
 
