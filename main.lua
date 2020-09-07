@@ -1,5 +1,4 @@
 
-
 local WorldMapFrame = _G.WorldMapFrame
 local MapUtil = _G.MapUtil
 local GetTime = _G.GetTime
@@ -49,7 +48,6 @@ local function RestoreMapState()
     WorldMapFrame:OnMapChanged()
   end
 end
-
 
 
 
@@ -132,8 +130,6 @@ WorldMapFrame.ScrollContainer:HookScript("OnMouseUp", function(self)
 end)
 
 
-
-
 resetButton = CreateFrame("Button", nil, WorldMapFrame.ScrollContainer, "UIPanelButtonTemplate")
 resetButton:SetPoint("BOTTOMRIGHT", WorldMapFrame.SidePanelToggle.CloseButton, "BOTTOMLEFT", 1, 1)
 resetButton:SetText("Reset View")
@@ -142,27 +138,6 @@ resetButton:SetScript("OnClick", function()
     ResetMap()
 	end)
 resetButton:Hide()
-
-
-
-local startupFrame = CreateFrame("Frame")
-startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-startupFrame:SetScript("OnEvent", function()
-
-  -- Needed for the boss pins to work in combat lockdown.
-  if not IsAddOnLoaded("Blizzard_EncounterJournal") then
-    EncounterJournal_LoadUI()
-  end
-  -- Open once to initialise.
-  EncounterJournal_OpenJournal()
-
-  -- If you just do EncounterJournal:Hide(), ESC to open the menu will not
-  -- work right after login.
-  EncounterJournalCloseButton:Click()
-
-  -- Otherwise closing EncounterJournal with ESC may not work during combat.
-  tinsert(UISpecialFrames, "EncounterJournal")
-end)
 
 
 hooksecurefunc(WorldMapFrame, "SetMapID", function(self, mapID)
@@ -208,6 +183,7 @@ hooksecurefunc(WorldMapFrame, "SetMapID", function(self, mapID)
   end)
 
 
+
 -- Frame to listen to zone change events
 -- such that the map gets reset when opened after having
 -- changed into an area with a different map.
@@ -223,7 +199,6 @@ zoneChangeFrame:RegisterEvent("AREA_POIS_UPDATED")
 
 zoneChangeFrame:SetScript("OnEvent", function(self, event, ...)
   -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil.GetDisplayableMapForPlayer(), lastViewedMapWasCurrentMap)
-
   if WorldMapFrame:GetMapID() ~= MapUtil.GetDisplayableMapForPlayer() then
     if lastViewedMapWasCurrentMap then
       ResetMap()
@@ -233,22 +208,84 @@ zoneChangeFrame:SetScript("OnEvent", function(self, event, ...)
   else
     resetButton:Hide()
   end
-
 end)
 
 
 
--- Needed to fix taint of newly added quest tracker entries.
--- Otherwise the map does not open when clicking on these.
-local originalObjectiveTrackerBlockHeader_OnClick = ObjectiveTrackerBlockHeader_OnClick
-ObjectiveTrackerBlockHeader_OnClick = function(...)
-  local _, mouseButton = ...
 
-  -- In combat lockdown, the map cannot be opened by ObjectiveTrackerBlockHeader_OnClick...
-  if InCombatLockdown() and not IsShiftKeyDown() and mouseButton == "LeftButton" and not WorldMapFrame:IsShown() then
+-- Needed to fix taint of newly added quest tracker entries
+-- and of the QuestLogPopupDetailFrame.ShowMapButton.
+-- Otherwise the map does not open when clicking on these in combat.
+local OriginalQuestMapFrame_OpenToQuestDetails = QuestMapFrame_OpenToQuestDetails
+QuestMapFrame_OpenToQuestDetails = function(...)
+  if InCombatLockdown() and not WorldMapFrame:IsShown() then
     WorldMapFrame:Show()
   end
 
-  originalObjectiveTrackerBlockHeader_OnClick(...)
+  -- WorldMapFrame and QuestLogPopupDetailFrame are not meant to be shown together!
+  -- This mutual exclusion may be prevented by other addons like Mapster.
+  if QuestLogPopupDetailFrame:IsShown() then
+    if InCombatLockdown() then
+      QuestLogPopupDetailFrame:Hide()
+    else
+      HideUIPanel(QuestLogPopupDetailFrame)
+    end
+  end
+
+  OriginalQuestMapFrame_OpenToQuestDetails(...)
 end
+
+
+local OriginalQuestObjectiveTracker_OpenQuestDetails = QuestObjectiveTracker_OpenQuestDetails
+QuestObjectiveTracker_OpenQuestDetails = function(...)
+  if InCombatLockdown() and not QuestLogPopupDetailFrame:IsShown() then
+    QuestLogPopupDetailFrame:Show()
+  end
+
+  -- WorldMapFrame and QuestLogPopupDetailFrame are not meant to be shown together!
+  -- This mutual exclusion may be prevented by other addons like Mapster.
+  if WorldMapFrame:IsShown() then
+    if InCombatLockdown() then
+      WorldMapFrame:Hide()
+    else
+      HideUIPanel(WorldMapFrame)
+    end
+  end
+
+  OriginalQuestObjectiveTracker_OpenQuestDetails(...)
+end
+
+
+
+
+
+
+local startupFrame = CreateFrame("Frame")
+startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+startupFrame:SetScript("OnEvent", function()
+
+  -- Need to initialise here, otherwise the tainted functions (see below)
+  -- cannot use WorldMapFrame:Show() right away.
+  ToggleWorldMap()
+  ToggleWorldMap()
+
+  -- Got to call this once to bring the frame into the right position.
+  -- Otherwise it will be misplaced when Show() is the first called function.
+  ShowUIPanel(QuestLogPopupDetailFrame)
+  HideUIPanel(QuestLogPopupDetailFrame)
+
+  -- Needed for the boss pins to work in combat lockdown.
+  if not IsAddOnLoaded("Blizzard_EncounterJournal") then
+    EncounterJournal_LoadUI()
+  end
+  -- Open once to initialise.
+  EncounterJournal_OpenJournal()
+  -- If you just do EncounterJournal:Hide(), ESC to open the menu will not
+  -- work right after login.
+  EncounterJournalCloseButton:Click()
+  -- Otherwise closing EncounterJournal with ESC may not work during combat.
+  tinsert(UISpecialFrames, "EncounterJournal")
+
+end)
+
 
