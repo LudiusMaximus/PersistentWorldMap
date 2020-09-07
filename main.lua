@@ -244,12 +244,11 @@ local originalObjectiveTrackerBlockHeader_OnClick = ObjectiveTrackerBlockHeader_
 ObjectiveTrackerBlockHeader_OnClick = function(...)
   local _, mouseButton = ...
 
-  -- Only for non-shift left button when in combat lockdown.
-  if not InCombatLockdown() or IsShiftKeyDown() or mouseButton ~= "LeftButton" then
-    return originalObjectiveTrackerBlockHeader_OnClick(...)
+  -- In combat lockdown, the map cannot be opened by ObjectiveTrackerBlockHeader_OnClick...
+  if InCombatLockdown() and not IsShiftKeyDown() and mouseButton == "LeftButton" and not WorldMapFrame:IsShown() then
+    WorldMapFrame:Show()
   end
 
-  WorldMapFrame:Show()
   originalObjectiveTrackerBlockHeader_OnClick(...)
 end
 
