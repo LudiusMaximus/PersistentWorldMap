@@ -163,7 +163,6 @@ hooksecurefunc(WorldMapFrame, "SetMapID",
 
         if v.pinTemplate and (v.pinTemplate == "EncounterJournalPinTemplate" or v.pinTemplate == "DungeonEntrancePinTemplate") then
 
-
           -- local instanceID = v.instanceID or v.journalInstanceID
           -- local encounterID = v.encounterID
 
@@ -182,14 +181,20 @@ hooksecurefunc(WorldMapFrame, "SetMapID",
               -- WorldMapFrame:Hide() will lead to ToggleGameMenu() not working any more
               -- because WorldMapFrame will still be listed in UIParent's FramePositionDelegate.
               -- So we only hide it, if WorldMapFrame is not in UIPanelWindows (e.g. Mapster).
+              -- TODO: Make mutual exclusiveness optional!
               if WorldMapFrame:IsShown() and not UIPanelWindows["WorldMapFrame"] then
                 WorldMapFrame:Hide()
               end
 
+            else
+            
+              -- May be prevented by addons like Mapster.
+              -- TODO: Make mutual exclusiveness optional! In this case, only raise!
+              HideUIPanel(WorldMapFrame)
+ 
             end
 
             OriginalOnClick(...)
-
           end
         end
       end
@@ -245,10 +250,10 @@ QuestMapFrame_OpenToQuestDetails = function(...)
     if QuestLogPopupDetailFrame:IsShown() then
       QuestLogPopupDetailFrame:Hide()
     end
+  else
+    -- May be prevented by addons like Mapster.
+    HideUIPanel(QuestLogPopupDetailFrame)
   end
-
-  -- For mapster?
-  -- HideUIPanel(QuestLogPopupDetailFrame)
 
   OriginalQuestMapFrame_OpenToQuestDetails(...)
 end
@@ -287,7 +292,6 @@ QuestLogPopupDetailFrame_Show = function(...)
       if not UIPanelWindows["WorldMapFrame"] then
         WorldMapFrame:Hide()
       else
-
         -- It seems that either the QuestMapFrame.DetailsFrame (side pane)
         -- or QuestLogPopupDetailFrame can show the quest details.
         -- The other gets emptied, which looks odd if it is not hidden.
@@ -297,6 +301,9 @@ QuestLogPopupDetailFrame_Show = function(...)
 
       end
     end
+  else
+    -- May be prevented by addons like Mapster.
+    HideUIPanel(WorldMapFrame)
   end
 
   OriginalQuestLogPopupDetailFrame_Show(...)
@@ -338,6 +345,15 @@ end)
 
 -- Needed for overlapping WorldMapFrame and EncounterJournal.
 hooksecurefunc("OpenWorldMap", function(...)
+  
+  -- May be prevented by addons like Mapster.
+  -- TODO: Make mutual exclusiveness optional!
+  if InCombatLockdown() then
+    EncounterJournal:Hide()
+  else
+    HideUIPanel(EncounterJournal)
+  end
+  
   WorldMapFrame:Raise()
 end)
 
