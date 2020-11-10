@@ -187,11 +187,11 @@ hooksecurefunc(WorldMapFrame, "SetMapID",
               end
 
             else
-            
+
               -- May be prevented by addons like Mapster.
               -- TODO: Make mutual exclusiveness optional! In this case, only raise!
               HideUIPanel(WorldMapFrame)
- 
+
             end
 
             OriginalOnClick(...)
@@ -260,7 +260,6 @@ end
 
 
 
-
 -- Same as above.
 -- QuestLogPopupDetailFrame_Show is called when you right click
 -- on a quest tracker entry and select "Open Quest Details".
@@ -315,37 +314,36 @@ local startupFrame = CreateFrame("Frame")
 startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 startupFrame:SetScript("OnEvent", function()
 
-
   -- Needed for the boss pins to work in combat lockdown.
   if not IsAddOnLoaded("Blizzard_EncounterJournal") then
     EncounterJournal_LoadUI()
   end
 
-  -- Got to call this once to bring the frames into the right position.
-  -- Otherwise it will be misplaced when Show() is the first called function.
-  ShowUIPanel(EncounterJournal)
-  HideUIPanel(EncounterJournal)
-
-  ShowUIPanel(QuestLogPopupDetailFrame)
-  HideUIPanel(QuestLogPopupDetailFrame)
-
-  ShowUIPanel(WorldMapFrame)
-  HideUIPanel(WorldMapFrame)
-
+  -- Got to call this to bring the frames into the right position.
+  -- Otherwise they will be misplaced when frame:Show() is called
+  -- before the first ShowUIPanel(frame).
+  EncounterJournal:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
+  QuestLogPopupDetailFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
+  WorldMapFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
 
   -- Otherwise closing with ESC may not work during combat.
   tinsert(UISpecialFrames, "EncounterJournal")
   tinsert(UISpecialFrames, "QuestLogPopupDetailFrame")
   tinsert(UISpecialFrames, "WorldMapFrame")
 
-end)
+  QuestLogPopupDetailFrame:HookScript("OnShow", function()
+    if WorldMapFrame:IsShown() then
+      WorldMapFrame:Hide()
+    end
+  end)
 
+end)
 
 
 
 -- Needed for overlapping WorldMapFrame and EncounterJournal.
 hooksecurefunc("OpenWorldMap", function(...)
-  
+
   -- May be prevented by addons like Mapster.
   -- TODO: Make mutual exclusiveness optional!
   if InCombatLockdown() then
@@ -353,8 +351,7 @@ hooksecurefunc("OpenWorldMap", function(...)
   else
     HideUIPanel(EncounterJournal)
   end
-  
+
   WorldMapFrame:Raise()
 end)
-
 
