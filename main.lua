@@ -140,69 +140,6 @@ resetButton:SetScript("OnClick", function()
 resetButton:Hide()
 
 
-hooksecurefunc(WorldMapFrame, "SetMapID",
-  function(self, mapID)
-    -- print("SetMapID", mapID, MapUtil.GetDisplayableMapForPlayer())
-
-    if WorldMapFrame:IsShown() then
-      lastViewedMapWasCurrentMap = (mapID == MapUtil.GetDisplayableMapForPlayer())
-      if mapID ~= MapUtil.GetDisplayableMapForPlayer() then
-        resetButton:Show()
-      else
-        resetButton:Hide()
-      end
-    end
-
-
-    -- During combat, the OnClick functions of the dungeon/boss pins do not manage
-    -- to bring up EncounterJournal and hide WorldMapFrame.
-    if WorldMapFrame.ScrollContainer.Child then
-      local kids = { WorldMapFrame.ScrollContainer.Child:GetChildren() };
-      for _, v in ipairs(kids) do
-        -- print (v.pinTemplate)
-
-        if v.pinTemplate and (v.pinTemplate == "EncounterJournalPinTemplate" or v.pinTemplate == "DungeonEntrancePinTemplate") then
-
-          -- local instanceID = v.instanceID or v.journalInstanceID
-          -- local encounterID = v.encounterID
-
-          local OriginalOnClick = v.OnClick
-          v.OnClick = function(...)
-            if InCombatLockdown() then
-              -- Actually not needed, because OriginalOnClick() will take care of this.
-              -- if instanceID then  EncounterJournal_DisplayInstance(instanceID) end
-              -- if encounterID then EncounterJournal_DisplayEncounter(encounterID) end
-
-              if not EncounterJournal:IsShown() then
-                EncounterJournal:Show()
-              end
-              EncounterJournal:Raise()
-
-              -- WorldMapFrame:Hide() will lead to ToggleGameMenu() not working any more
-              -- because WorldMapFrame will still be listed in UIParent's FramePositionDelegate.
-              -- So we only hide it, if WorldMapFrame is not in UIPanelWindows (e.g. Mapster).
-              -- TODO: Make mutual exclusiveness optional!
-              if WorldMapFrame:IsShown() and not UIPanelWindows["WorldMapFrame"] then
-                WorldMapFrame:Hide()
-              end
-
-            else
-
-              -- May be prevented by addons like Mapster.
-              -- TODO: Make mutual exclusiveness optional! In this case, only raise!
-              HideUIPanel(WorldMapFrame)
-
-            end
-
-            OriginalOnClick(...)
-          end
-        end
-      end
-    end
-  end
-)
-
-
 
 -- Frame to listen to zone change events
 -- such that the map gets reset when opened after having
@@ -217,18 +154,94 @@ zoneChangeFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 -- Needed for map changes in dungeons.
 zoneChangeFrame:RegisterEvent("AREA_POIS_UPDATED")
 
-zoneChangeFrame:SetScript("OnEvent", function(self, event, ...)
-  -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil.GetDisplayableMapForPlayer(), lastViewedMapWasCurrentMap)
-  if WorldMapFrame:GetMapID() ~= MapUtil.GetDisplayableMapForPlayer() then
-    if lastViewedMapWasCurrentMap then
-      ResetMap()
+zoneChangeFrame:SetScript("OnEvent",
+  function(self, event, ...)
+    -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil.GetDisplayableMapForPlayer(), lastViewedMapWasCurrentMap)
+    if WorldMapFrame:GetMapID() ~= MapUtil.GetDisplayableMapForPlayer() then
+      if lastViewedMapWasCurrentMap then
+        ResetMap()
+      else
+        resetButton:Show()
+      end
     else
-      resetButton:Show()
+      resetButton:Hide()
     end
-  else
-    resetButton:Hide()
   end
-end)
+)
+
+
+
+
+
+-- During combat, the OnClick functions of the dungeon/boss pins do not manage
+-- to bring up EncounterJournal, which is why we apply this workaround.
+local function HookPins()
+
+  if WorldMapFrame.ScrollContainer.Child then
+    local kids = { WorldMapFrame.ScrollContainer.Child:GetChildren() };
+    for _, v in ipairs(kids) do
+      -- print("pinTemplate", v.pinTemplate, v.instanceID, v.journalInstanceID)
+
+      if v.pinTemplate and not v.pwm_alreadyHooked and (v.pinTemplate == "EncounterJournalPinTemplate" or v.pinTemplate == "DungeonEntrancePinTemplate") then
+
+        -- local instanceID = v.instanceID or v.journalInstanceID
+        -- local encounterID = v.encounterID
+
+        local OriginalOnClick = v.OnClick
+        v.OnClick = function(...)
+
+          if InCombatLockdown() then
+            -- Actually not needed, because OriginalOnClick() will take care of this.
+            -- if instanceID then  EncounterJournal_DisplayInstance(instanceID) end
+            -- if encounterID then EncounterJournal_DisplayEncounter(encounterID) end
+
+            if not EncounterJournal:IsShown() then
+              EncounterJournal:Show()
+            else
+              EncounterJournal:Raise()
+            end
+
+          end
+
+          OriginalOnClick(...)
+        end
+
+        v.pwm_alreadyHooked = true
+      end
+    end
+  end
+end
+
+
+hooksecurefunc(WorldMapFrame, "SetMapID",
+  function(self, mapID)
+    -- print("SetMapID", mapID, MapUtil.GetDisplayableMapForPlayer())
+
+    if WorldMapFrame:IsShown() then
+      lastViewedMapWasCurrentMap = (mapID == MapUtil.GetDisplayableMapForPlayer())
+      if mapID ~= MapUtil.GetDisplayableMapForPlayer() then
+        resetButton:Show()
+      else
+        resetButton:Hide()
+      end
+    end
+
+    HookPins()
+  end
+)
+
+
+-- If the dungeon pins were not activated when the map was first changed,
+-- we need to execute the hooks again, when the user activates them.
+hooksecurefunc(WorldMapFrame, "RefreshAllDataProviders",
+  function(...)
+    HookPins()
+  end
+)
+
+
+
+
 
 
 
@@ -237,22 +250,16 @@ end)
 -- QuestMapFrame_OpenToQuestDetails is called when clicking on a quest tracker entry
 -- or when clicking on the ShowMapButton of QuestLogPopupDetailFrame.
 -- During combat, QuestMapFrame_OpenToQuestDetails does not manage
--- to bring up WorldMapFrame and hide QuestLogPopupDetailFrame.
+-- to bring up WorldMapFrame and hide EncounterJournal and QuestLogPopupDetailFrame.
 local OriginalQuestMapFrame_OpenToQuestDetails = QuestMapFrame_OpenToQuestDetails
 QuestMapFrame_OpenToQuestDetails = function(...)
 
   if InCombatLockdown() then
     if not WorldMapFrame:IsShown() then
       WorldMapFrame:Show()
+    else
+      WorldMapFrame:Raise()
     end
-    WorldMapFrame:Raise()
-
-    if QuestLogPopupDetailFrame:IsShown() then
-      QuestLogPopupDetailFrame:Hide()
-    end
-  else
-    -- May be prevented by addons like Mapster.
-    HideUIPanel(QuestLogPopupDetailFrame)
   end
 
   OriginalQuestMapFrame_OpenToQuestDetails(...)
@@ -260,53 +267,86 @@ end
 
 
 
--- Same as above.
+
 -- QuestLogPopupDetailFrame_Show is called when you right click
 -- on a quest tracker entry and select "Open Quest Details".
--- During combat, QuestLogPopupDetailFrame_Show does not manage
--- to bring up QuestLogPopupDetailFrame and hide WorldMapFrame.
+-- During combat, QuestLogPopupDetailFrame_Show does not manage to
+-- bring up QuestLogPopupDetailFrame, so we have to show it manually.
 local OriginalQuestLogPopupDetailFrame_Show = QuestLogPopupDetailFrame_Show
 QuestLogPopupDetailFrame_Show = function(...)
 
   if InCombatLockdown() then
+
     if not QuestLogPopupDetailFrame:IsShown() then
       QuestLogPopupDetailFrame:Show()
 
-    -- If QuestLogPopupDetailFrame is already open for the quest,
-    -- it should be closed, which QuestLogPopupDetailFrame_Show with
-    -- its HideUIPanel() also cannot do during combat.
     else
+      -- If QuestLogPopupDetailFrame is already shown for the clicked quest,
+      -- it should be closed, which QuestLogPopupDetailFrame_Show with
+      -- its HideUIPanel() also cannot do during combat.
       local questLogIndex = ...
       local questID = C_QuestLog.GetQuestIDForLogIndex(questLogIndex)
       if QuestLogPopupDetailFrame.questID == questID then
         QuestLogPopupDetailFrame:Hide()
         return
-      end
-    end
-
-    -- WorldMapFrame:Hide() will lead to ToggleGameMenu() not working any more
-    -- because WorldMapFrame will still be listed in UIParent's FramePositionDelegate.
-    -- So we only hide it, if WorldMapFrame is not in UIPanelWindows (e.g. Mapster).
-    if WorldMapFrame:IsShown() then
-      if not UIPanelWindows["WorldMapFrame"] then
-        WorldMapFrame:Hide()
       else
-        -- It seems that either the QuestMapFrame.DetailsFrame (side pane)
-        -- or QuestLogPopupDetailFrame can show the quest details.
-        -- The other gets emptied, which looks odd if it is not hidden.
-        -- Thus, when we cannot hide WorldMapFrame, we can at least
-        -- prevent this empty side pane by restoring it to the default.
-        QuestMapFrame_ReturnFromQuestDetails()
-
+        QuestLogPopupDetailFrame:Raise()
       end
     end
-  else
-    -- May be prevented by addons like Mapster.
-    HideUIPanel(WorldMapFrame)
   end
 
   OriginalQuestLogPopupDetailFrame_Show(...)
 end
+
+
+
+
+
+local function CloseWorldMapFrame(orReset)
+  if WorldMapFrame:IsShown() then
+    if InCombatLockdown() then
+
+      -- WorldMapFrame:Hide() will lead to ToggleGameMenu() not working any more
+      -- because WorldMapFrame will still be listed in UIParent's FramePositionDelegate.
+      -- So we only hide it, if WorldMapFrame is not in UIPanelWindows (e.g. Mapster).
+      if not UIPanelWindows["WorldMapFrame"] then
+        WorldMapFrame:Hide()
+
+      -- Only QuestMapFrame.DetailsFrame (side pane) or QuestLogPopupDetailFrame
+      -- can show the quest details; but not both at the same time.
+      -- The other gets emptied, which looks odd if it is not hidden.
+      -- Thus, when we cannot hide WorldMapFrame, we can at least
+      -- prevent the empty side pane by restoring it to the default.
+      elseif orReset then
+        QuestMapFrame_ReturnFromQuestDetails()
+      end
+
+    else
+      HideUIPanel(WorldMapFrame)
+    end
+  end
+end
+
+local function CloseEncounterJournal()
+  if EncounterJournal:IsShown() then
+    if InCombatLockdown() then
+      EncounterJournal:Hide()
+    else
+      HideUIPanel(EncounterJournal)
+    end
+  end
+end
+
+local function CloseQuestLogPopupDetailFrame()
+  if QuestLogPopupDetailFrame:IsShown() then
+    if InCombatLockdown() then
+      QuestLogPopupDetailFrame:Hide()
+    else
+      HideUIPanel(QuestLogPopupDetailFrame)
+    end
+  end
+end
+
 
 
 
@@ -322,36 +362,47 @@ startupFrame:SetScript("OnEvent", function()
   -- Got to call this to bring the frames into the right position.
   -- Otherwise they will be misplaced when frame:Show() is called
   -- before the first ShowUIPanel(frame).
+  WorldMapFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
   EncounterJournal:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
   QuestLogPopupDetailFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
-  WorldMapFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
+
 
   -- Otherwise closing with ESC may not work during combat.
+  tinsert(UISpecialFrames, "WorldMapFrame")
   tinsert(UISpecialFrames, "EncounterJournal")
   tinsert(UISpecialFrames, "QuestLogPopupDetailFrame")
-  tinsert(UISpecialFrames, "WorldMapFrame")
 
-  QuestLogPopupDetailFrame:HookScript("OnShow", function()
-    if WorldMapFrame:IsShown() then
-      WorldMapFrame:Hide()
-    end
+
+  -- May be prevented by other addons.
+  -- TODO: Make mutual exclusiveness optional!
+  EncounterJournal:HookScript("OnShow", function()
+    CloseWorldMapFrame()
+    CloseQuestLogPopupDetailFrame()
   end)
 
-end)
+  QuestLogPopupDetailFrame:HookScript("OnShow", function()
+    CloseWorldMapFrame(true)
+    CloseEncounterJournal()
+  end)
 
 
+  -- We should not hide WorldMapFrame during combat,
+  -- because this prevents ESC from working afterwards.
+  -- Hence, showing WorldMapFrame is sometimes not enough.
+  -- We also need to raise it.
+  hooksecurefunc("OpenWorldMap", function(...)
+    WorldMapFrame:Raise()
+  end)
 
--- Needed for overlapping WorldMapFrame and EncounterJournal.
-hooksecurefunc("OpenWorldMap", function(...)
+  WorldMapFrame:HookScript("OnShow", function()
+    CloseEncounterJournal()
+    CloseQuestLogPopupDetailFrame()
+  end)
 
-  -- May be prevented by addons like Mapster.
-  -- TODO: Make mutual exclusiveness optional!
-  if InCombatLockdown() then
-    EncounterJournal:Hide()
-  else
-    HideUIPanel(EncounterJournal)
-  end
+  hooksecurefunc(WorldMapFrame, "Raise", function(...)
+    CloseEncounterJournal()
+    CloseQuestLogPopupDetailFrame()
+  end)
 
-  WorldMapFrame:Raise()
 end)
 
