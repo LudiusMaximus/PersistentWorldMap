@@ -141,6 +141,26 @@ resetButton:Hide()
 
 
 
+
+
+
+
+
+
+
+local function CheckMap()
+  if WorldMapFrame:GetMapID() ~= MapUtil.GetDisplayableMapForPlayer() then
+    if lastViewedMapWasCurrentMap then
+      ResetMap()
+    else
+      resetButton:Show()
+    end
+  else
+    resetButton:Hide()
+  end
+end
+
+
 -- Frame to listen to zone change events
 -- such that the map gets reset when opened after having
 -- changed into an area with a different map.
@@ -157,15 +177,7 @@ zoneChangeFrame:RegisterEvent("AREA_POIS_UPDATED")
 zoneChangeFrame:SetScript("OnEvent",
   function(self, event, ...)
     -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil.GetDisplayableMapForPlayer(), lastViewedMapWasCurrentMap)
-    if WorldMapFrame:GetMapID() ~= MapUtil.GetDisplayableMapForPlayer() then
-      if lastViewedMapWasCurrentMap then
-        ResetMap()
-      else
-        resetButton:Show()
-      end
-    else
-      resetButton:Hide()
-    end
+    CheckMap()
   end
 )
 
@@ -403,6 +415,17 @@ startupFrame:SetScript("OnEvent", function()
     CloseEncounterJournal()
     CloseQuestLogPopupDetailFrame()
   end)
+
+
+  -- Some map changes (especially when moving out of any zone, so the map shows the whole continent)
+  -- are not accompanied by any event. So we just check repeatedly.
+  local function TimedUpdate()
+    if WorldMapFrame:IsShown() then
+      CheckMap()
+    end
+    C_Timer.After(1, TimedUpdate)
+  end
+  TimedUpdate()
 
 end)
 
