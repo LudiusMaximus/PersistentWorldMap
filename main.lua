@@ -54,7 +54,7 @@ end
 -- Post hook for ToggleWorldMap to restore map after it is shown.
 -- (Cannot do this with WorldMapFrame.ScrollContainer:HookScript("OnShow"),
 -- because it gets called too early.)
-hooksecurefunc("ToggleWorldMap", function()
+local function RestoreMap()
   if WorldMapFrame:IsShown() then
     -- print("Post Hook after showing", GetTime(), lastMapCloseTime, GetTime() - lastMapCloseTime, resetMapAfter)
     if GetTime() - lastMapCloseTime > resetMapAfter then
@@ -63,7 +63,10 @@ hooksecurefunc("ToggleWorldMap", function()
       RestoreMapState()
     end
   end
-end)
+end
+
+hooksecurefunc("ToggleWorldMap", RestoreMap)
+hooksecurefunc("ToggleQuestLog", RestoreMap)
 
 
 -- Pre hook for WorldMapFrame.ScrollContainer OnHide to store map before it is hidden.
