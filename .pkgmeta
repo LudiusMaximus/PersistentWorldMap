@@ -1,8 +1,0 @@
-package-as: PersistentWorldMap
-
-enable-nolib-creation: no
-
-ludius-changelog: yes
-
-ignore:
- - README.md
