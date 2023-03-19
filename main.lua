@@ -276,6 +276,11 @@ QuestMapFrame_OpenToQuestDetails = function(...)
       WorldMapFrame:Raise()
     end
   end
+  
+  -- Mapster prevents the quest frame from being closed, which results in an empty quest frame.
+  if QuestFrame:IsShown() then
+    QuestFrame_OnHide()
+  end
 
   OriginalQuestMapFrame_OpenToQuestDetails(...)
 end
