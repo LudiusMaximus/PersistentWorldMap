@@ -1,7 +1,13 @@
 
+
+
+
+
+
 local WorldMapFrame = _G.WorldMapFrame
 local MapUtil = _G.MapUtil
 local GetTime = _G.GetTime
+
 
 
 local lastMapID   = nil
@@ -30,7 +36,6 @@ end
 
 -- Called when reopenning the map.
 local function RestoreMapState()
-  -- print("RestoreMapState", lastMapID, lastScale, lastScrollX, lastScrollY)
   if lastMapID and lastScale and lastScrollX and lastScrollY then
     -- print("restoring", lastMapID, lastScale, lastScrollX, lastScrollY)
 
@@ -69,6 +74,7 @@ hooksecurefunc("ToggleWorldMap", RestoreMap)
 hooksecurefunc("ToggleQuestLog", RestoreMap)
 
 
+
 -- Pre hook for WorldMapFrame.ScrollContainer OnHide to store map before it is hidden.
 -- (Cannot do this with HookScript, because then it is called too late.
 -- Also cannot do this in hooksecurefunc of ToggleWorldMap, because then it is not called when
@@ -98,6 +104,7 @@ end)
 
 
 local function ResetMap()
+  -- print(MapUtil.GetDisplayableMapForPlayer())
   WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer())
   local currentScale = WorldMapFrame.ScrollContainer:GetCanvasScale()
   local currentZoomLevel = WorldMapFrame.ScrollContainer:GetZoomLevelIndexForScale(currentScale)
@@ -133,19 +140,54 @@ WorldMapFrame.ScrollContainer:HookScript("OnMouseUp", function(self)
 end)
 
 
-resetButton = CreateFrame("Button", nil, WorldMapFrame.ScrollContainer, "UIPanelButtonTemplate")
-resetButton:SetPoint("BOTTOMRIGHT", WorldMapFrame.SidePanelToggle.CloseButton, "BOTTOMLEFT", 1, 1)
-resetButton:SetText("Reset View")
-resetButton:SetWidth(120)
-resetButton:SetScript("OnClick", function()
-    ResetMap()
-	end)
-resetButton:Hide()
 
 
 
 
 
+local recenterButton = nil
+
+local function EnableRecenterButton()
+  recenterButton.centerDot.t:SetVertexColor(0, 0, 0, 1)
+  recenterButton:SetEnabled(true)
+
+  recenterButton:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText("|cffffffffRe-center map|r")
+  end)
+
+end
+
+local function DisableRecenterButton()
+  recenterButton.centerDot.t:SetVertexColor(1, 0.9, 0, 1)
+  recenterButton:SetEnabled(false)
+
+  recenterButton:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText("|cffffffffMap already centered|r")
+  end)
+
+end
+
+local function CreateRecenterButton(mapLegendButton)
+  recenterButton = CreateFrame("Button", nil, WorldMapFrame.ScrollContainer, "WorldMapShowLegendButtonTemplate")
+  recenterButton:SetPoint("TOPRIGHT", mapLegendButton, "TOPLEFT", 0, 0)
+  recenterButton:SetScript("OnClick", function()
+      ResetMap()
+    end)
+
+  recenterButton.Icon:SetAtlas("TargetCrosshairs")
+  recenterButton.Icon:SetTexCoord(0.1, 0.5, 0.1, 0.5)
+
+  recenterButton.centerDot = CreateFrame("Frame", nil, recenterButton)
+  local t = recenterButton.centerDot:CreateTexture(nil, "OVERLAY")
+  t:SetTexture("Interface\\AddOns\\PersistentWorldMap\\dot.tga")
+	t:SetPoint("CENTER", recenterButton, "CENTER", 0.3, 0.5)
+  t:SetSize(10, 10)
+  recenterButton.centerDot.t = t
+
+  DisableRecenterButton()
+end
 
 
 
@@ -156,10 +198,10 @@ local function CheckMap()
     if lastViewedMapWasCurrentMap then
       ResetMap()
     else
-      resetButton:Show()
+      EnableRecenterButton()
     end
   else
-    resetButton:Hide()
+    DisableRecenterButton()
   end
 end
 
@@ -235,9 +277,9 @@ hooksecurefunc(WorldMapFrame, "SetMapID",
     if WorldMapFrame:IsShown() then
       lastViewedMapWasCurrentMap = (mapID == MapUtil.GetDisplayableMapForPlayer())
       if mapID ~= MapUtil.GetDisplayableMapForPlayer() then
-        resetButton:Show()
+        EnableRecenterButton()
       else
-        resetButton:Hide()
+        DisableRecenterButton()
       end
     end
 
@@ -276,7 +318,7 @@ QuestMapFrame_OpenToQuestDetails = function(...)
       WorldMapFrame:Raise()
     end
   end
-  
+
   -- Mapster prevents the quest frame from being closed, which results in an empty quest frame.
   if QuestFrame:IsShown() then
     QuestFrame_OnHide()
@@ -435,5 +477,32 @@ startupFrame:SetScript("OnEvent", function()
   end
   TimedUpdate()
 
+
+  local mapLegendButton
+  for i, child in pairs({WorldMapFrame:GetChildren()}) do
+    if child.Icon and child.Icon:GetAtlas() == "QuestNormal" then
+      -- print("Found legend button:" , child:GetObjectType(), child:GetDebugName(), child.Icon:GetAtlas())
+      mapLegendButton = child
+    end
+  end
+
+  CreateRecenterButton(mapLegendButton)
+
 end)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
