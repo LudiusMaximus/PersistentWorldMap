@@ -148,6 +148,9 @@ end)
 local recenterButton = nil
 
 local function EnableRecenterButton()
+
+  if not recenterButton then return end
+
   recenterButton.centerDot.t:SetVertexColor(0, 0, 0, 1)
   recenterButton:SetEnabled(true)
 
@@ -159,6 +162,9 @@ local function EnableRecenterButton()
 end
 
 local function DisableRecenterButton()
+
+  if not recenterButton then return end
+
   recenterButton.centerDot.t:SetVertexColor(1, 0.9, 0, 1)
   recenterButton:SetEnabled(false)
 
