@@ -423,7 +423,7 @@ startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 startupFrame:SetScript("OnEvent", function()
 
   -- Needed for the boss pins to work in combat lockdown.
-  if not IsAddOnLoaded("Blizzard_EncounterJournal") then
+  if not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
     EncounterJournal_LoadUI()
   end
 
