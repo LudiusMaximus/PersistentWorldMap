@@ -147,40 +147,52 @@ end)
 
 local recenterButton = nil
 
+local RecenterButtonEnterFunction = function(button)
+  GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
+  if button:IsEnabled() then
+    GameTooltip:SetText("|cffffffffClick to re-center map\n(or shift-click on map)|r")
+  else
+    GameTooltip:SetText("|cffffffffMap already centered|r")
+  end
+end
+
 local function EnableRecenterButton()
-
   if not recenterButton then return end
-
   recenterButton.centerDot.t:SetVertexColor(0, 0, 0, 1)
   recenterButton:SetEnabled(true)
-
-  recenterButton:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("|cffffffffRe-center map|r")
-  end)
-
+  if GameTooltip:GetOwner() == recenterButton then
+    RecenterButtonEnterFunction(recenterButton)
+  end
 end
 
 local function DisableRecenterButton()
-
   if not recenterButton then return end
-
   recenterButton.centerDot.t:SetVertexColor(1, 0.9, 0, 1)
   recenterButton:SetEnabled(false)
-
-  recenterButton:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("|cffffffffMap already centered|r")
-  end)
-
+  if GameTooltip:GetOwner() == recenterButton then
+    RecenterButtonEnterFunction(recenterButton)
+  end
 end
 
-local function CreateRecenterButton(mapLegendButton)
-  recenterButton = CreateFrame("Button", nil, WorldMapFrame.ScrollContainer, "WorldMapShowLegendButtonTemplate")
-  recenterButton:SetPoint("TOPRIGHT", mapLegendButton, "TOPLEFT", 0, 0)
+
+local function CreateRecenterButton(anchorButton)
+  -- Template in RecenterButtonTemplate.xml copied from WorldMapTrackingPinButtonTemplate
+  -- in Blizzard's \Interface\AddOns\Blizzard_WorldMap\Blizzard_WorldMapTemplates.xml
+  recenterButton = CreateFrame("Button", nil, WorldMapFrame.ScrollContainer, "RecenterButtonTemplate")
+  recenterButton:SetPoint("TOPRIGHT", anchorButton, "BOTTOMRIGHT", 0, 0)
+
   recenterButton:SetScript("OnClick", function()
       ResetMap()
+      DisableRecenterButton()
     end)
+
+  recenterButton:SetScript("OnEnter", function(self)
+    RecenterButtonEnterFunction(self)
+  end)
+
+  recenterButton:SetScript("OnLeave", function(self)
+    GameTooltip:Hide()
+  end)
 
   recenterButton.Icon:SetAtlas("TargetCrosshairs")
   recenterButton.Icon:SetTexCoord(0.1, 0.5, 0.1, 0.5)
@@ -484,15 +496,18 @@ startupFrame:SetScript("OnEvent", function()
   TimedUpdate()
 
 
-  local mapLegendButton
+
+
+  -- Put the recenter button below the map pin button.
+  local mapPinButton
   for i, child in pairs({WorldMapFrame:GetChildren()}) do
-    if child.Icon and child.Icon:GetAtlas() == "QuestNormal" then
+    -- print(i, child, child.Icon, child.Icon and child.Icon:GetAtlas() or "")
+    if child.Icon and child.Icon:GetAtlas() == "Waypoint-MapPin-Untracked" then
       -- print("Found legend button:" , child:GetObjectType(), child:GetDebugName(), child.Icon:GetAtlas())
-      mapLegendButton = child
+      mapPinButton = child
     end
   end
-
-  CreateRecenterButton(mapLegendButton)
+  CreateRecenterButton(mapPinButton)
 
 end)
 
