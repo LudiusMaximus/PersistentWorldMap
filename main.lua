@@ -36,6 +36,9 @@ end
 
 -- Called when reopenning the map.
 local function RestoreMapState()
+  -- Would be sad, if this is the only way to prevent the Frame:SetPropagateMouseClicks() taint error.
+  if InCombatLockdown() then return end
+
   if lastMapID and lastScale and lastScrollX and lastScrollY then
     -- print("restoring", lastMapID, lastScale, lastScrollX, lastScrollY)
 
@@ -104,7 +107,7 @@ end)
 
 
 local function ResetMap()
-  -- print(MapUtil.GetDisplayableMapForPlayer())
+  -- print("ResetMap", MapUtil.GetDisplayableMapForPlayer())
   WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer())
   local currentScale = WorldMapFrame.ScrollContainer:GetCanvasScale()
   local currentZoomLevel = WorldMapFrame.ScrollContainer:GetZoomLevelIndexForScale(currentScale)
