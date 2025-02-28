@@ -1,13 +1,8 @@
 
 
-
-
-
-
 local WorldMapFrame = _G.WorldMapFrame
 local MapUtil = _G.MapUtil
 local GetTime = _G.GetTime
-
 
 
 local lastMapID   = nil
@@ -107,6 +102,10 @@ end)
 
 
 local function ResetMap()
+
+  -- Would be sad, if this is the only way to prevent the Frame:SetPropagateMouseClicks() taint error.
+  if InCombatLockdown() then return end
+
   -- print("ResetMap", MapUtil.GetDisplayableMapForPlayer())
   WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer())
   local currentScale = WorldMapFrame.ScrollContainer:GetCanvasScale()
@@ -152,7 +151,14 @@ local recenterButton = nil
 
 local RecenterButtonEnterFunction = function(button)
   GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
+
   if button:IsEnabled() then
+
+    if InCombatLockdown() then
+      GameTooltip:SetText("|cffffffffDisabled during combat.|r")
+      return
+    end
+
     GameTooltip:SetText("|cffffffffClick to re-center map\n(or shift-click on map)|r")
   else
     GameTooltip:SetText("|cffffffffMap already centered|r")
@@ -190,12 +196,12 @@ local function CreateRecenterButton(anchorButton)
     end)
 
   recenterButton:SetScript("OnEnter", function(self)
-    RecenterButtonEnterFunction(self)
-  end)
+      RecenterButtonEnterFunction(self)
+    end)
 
   recenterButton:SetScript("OnLeave", function(self)
-    GameTooltip:Hide()
-  end)
+      GameTooltip:Hide()
+    end)
 
   recenterButton.Icon:SetAtlas("TargetCrosshairs")
   recenterButton.Icon:SetTexCoord(0.1, 0.5, 0.1, 0.5)
