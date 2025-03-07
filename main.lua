@@ -247,7 +247,7 @@ zoneChangeFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 zoneChangeFrame:RegisterEvent("AREA_POIS_UPDATED")
 
 zoneChangeFrame:SetScript("OnEvent",
-  function(self, event, ...)
+  function(_, event, ...)
     -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil.GetDisplayableMapForPlayer(), lastViewedMapWasCurrentMap)
     CheckMap()
   end
@@ -441,7 +441,8 @@ end
 
 local startupFrame = CreateFrame("Frame")
 startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-startupFrame:SetScript("OnEvent", function()
+startupFrame:SetScript("OnEvent", function(_, _, isLogin, isReload)
+  if not isLogin and not isReload then return end
 
   -- Needed for the boss pins to work in combat lockdown.
   if not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
@@ -503,7 +504,6 @@ startupFrame:SetScript("OnEvent", function()
     C_Timer.After(1, TimedUpdate)
   end
   TimedUpdate()
-
 
 
 
