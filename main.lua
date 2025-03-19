@@ -1,8 +1,120 @@
 
 
+-- #####################################################
+-- Preventing taint!
+-- #####################################################
+
+-- Overriding Blizzard_SharedMapDataProviders/SharedMapPoiTemplates.lua, L518
+function SuperTrackablePinMixin:OnAcquired(...)
+  if not self:IsSuperTrackingExternallyHandled() then
+
+    -- Ludius change to prevnt taint:
+    if not InCombatLockdown() then
+      self:UpdateMousePropagation();
+    end
+
+    self:UpdateSuperTrackedState(C_SuperTrack[self:GetSuperTrackAccessorAPIName()]());
+  end
+end
+
+-- Overriding Blizzard_MapCanvas/Blizzard_MapCanvas.lua, L230
+do
+  local function OnPinReleased(pinPool, pin)
+    local map = pin:GetMap();
+    if map then
+      map:UnregisterPin(pin);
+    end
+
+    Pool_HideAndClearAnchors(pinPool, pin);
+    pin:OnReleased();
+
+    pin.pinTemplate = nil;
+    pin.owningMap = nil;
+  end
+
+  local function OnPinMouseUp(pin, button, upInside)
+    pin:OnMouseUp(button, upInside);
+    if upInside then
+      pin:OnClick(button);
+    end
+  end
+
+  function WorldMapFrame:AcquirePin(pinTemplate, ...)
+
+    if not self.pinPools[pinTemplate] then
+      local pinTemplateType = self:GetPinTemplateType(pinTemplate);
+      self.pinPools[pinTemplate] = CreateFramePool(pinTemplateType, self:GetCanvas(), pinTemplate, OnPinReleased);
+    end
+
+    local pin, newPin = self.pinPools[pinTemplate]:Acquire();
+
+    pin.pinTemplate = pinTemplate;
+    pin.owningMap = self;
+
+    if newPin then
+      local isMouseClickEnabled = pin:IsMouseClickEnabled();
+      local isMouseMotionEnabled = pin:IsMouseMotionEnabled();
+
+      if isMouseClickEnabled then
+        pin:SetScript("OnMouseUp", OnPinMouseUp);
+        pin:SetScript("OnMouseDown", pin.OnMouseDown);
+
+        if pin:IsObjectType("Button") then
+          pin:SetScript("OnClick", nil);
+        end
+      end
+
+      if isMouseMotionEnabled then
+        if newPin and not pin:DisableInheritedMotionScriptsWarning() then
+          assert(pin:GetScript("OnEnter") == nil);
+          assert(pin:GetScript("OnLeave") == nil);
+        end
+        pin:SetScript("OnEnter", pin.OnMouseEnter);
+        pin:SetScript("OnLeave", pin.OnMouseLeave);
+      end
+
+      pin:SetMouseClickEnabled(isMouseClickEnabled);
+      pin:SetMouseMotionEnabled(isMouseMotionEnabled);
+    end
+
+    if newPin then
+      pin:OnLoad();
+    end
+
+    self.ScrollContainer:MarkCanvasDirty();
+    pin:Show();
+
+    pin:OnAcquired(...);
+
+    -- Ludius change to prevnt taint:
+    if not InCombatLockdown() then
+      pin:CheckMouseButtonPassthrough("RightButton");
+    end
+
+    self:RegisterPin(pin);
+
+    return pin;
+  end
+end
+
+
+
+
+
+
+
+
+
+
+local C_Map         = _G.C_Map
+local GetTime       = _G.GetTime
+local MapUtil       = _G.MapUtil
 local WorldMapFrame = _G.WorldMapFrame
-local MapUtil = _G.MapUtil
-local GetTime = _G.GetTime
+
+
+
+-- Forward declaration
+local CheckMap
 
 
 local lastMapID   = nil
@@ -31,13 +143,23 @@ end
 
 -- Called when reopenning the map.
 local function RestoreMapState()
-  -- Would be sad, if this is the only way to prevent the Frame:SetPropagateMouseClicks() taint error.
-  if InCombatLockdown() then return end
-
   if lastMapID and lastScale and lastScrollX and lastScrollY then
     -- print("restoring", lastMapID, lastScale, lastScrollX, lastScrollY)
 
-    WorldMapFrame:SetMapID(lastMapID)
+    -- Content of WorldMapFrame:SetMapID(lastMapID) separated:
+    local mapArtID = C_Map.GetMapArtID(lastMapID)
+    if WorldMapFrame.mapID ~= lastMapID or WorldMapFrame.mapArtID ~= mapArtID then
+      WorldMapFrame.areDetailLayersDirty = true;
+      WorldMapFrame.mapID = lastMapID;
+      WorldMapFrame.mapArtID = mapArtID;
+      WorldMapFrame.expandedMapInsetsByMapID = {};
+      WorldMapFrame.ScrollContainer:SetMapID(lastMapID);
+      if WorldMapFrame:IsShown() then
+        WorldMapFrame:RefreshDetailLayers();
+      end
+    end
+
+    lastViewedMapWasCurrentMap = (lastMapID == MapUtil.GetDisplayableMapForPlayer())
 
     WorldMapFrame.ScrollContainer.currentScale = lastScale
     WorldMapFrame.ScrollContainer.targetScale = lastScale
@@ -49,6 +171,8 @@ local function RestoreMapState()
     WorldMapFrame.ScrollContainer.targetScrollY = lastScrollY
 
     WorldMapFrame:OnMapChanged()
+
+    CheckMap()
   end
 end
 
@@ -103,9 +227,6 @@ end)
 
 local function ResetMap()
 
-  -- Would be sad, if this is the only way to prevent the Frame:SetPropagateMouseClicks() taint error.
-  if InCombatLockdown() then return end
-
   -- print("ResetMap", MapUtil.GetDisplayableMapForPlayer())
   WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer())
   local currentScale = WorldMapFrame.ScrollContainer:GetCanvasScale()
@@ -153,12 +274,6 @@ local RecenterButtonEnterFunction = function(button)
   GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
 
   if button:IsEnabled() then
-
-    if InCombatLockdown() then
-      GameTooltip:SetText("|cffffffffDisabled during combat.|r")
-      return
-    end
-
     GameTooltip:SetText("|cffffffffClick to re-center map\n(or shift-click on map)|r")
   else
     GameTooltip:SetText("|cffffffffMap already centered|r")
@@ -219,8 +334,8 @@ end
 
 
 
-
-local function CheckMap()
+-- Forward declaration above.
+CheckMap = function()
   if WorldMapFrame:GetMapID() ~= MapUtil.GetDisplayableMapForPlayer() then
     if lastViewedMapWasCurrentMap then
       ResetMap()
@@ -233,11 +348,9 @@ local function CheckMap()
 end
 
 
--- Frame to listen to zone change events
--- such that the map gets reset when opened after having
+-- Frame to listen to zone change events such that the map gets reset when opened after having
 -- changed into an area with a different map.
 local zoneChangeFrame = CreateFrame ("Frame")
-
 -- But only do this for areas, not for sub-zone changes.
 zoneChangeFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 zoneChangeFrame:RegisterEvent("ZONE_CHANGED")
@@ -245,20 +358,32 @@ zoneChangeFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
 zoneChangeFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 -- Needed for map changes in dungeons.
 zoneChangeFrame:RegisterEvent("AREA_POIS_UPDATED")
-
 zoneChangeFrame:SetScript("OnEvent",
   function(_, event, ...)
-    -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil.GetDisplayableMapForPlayer(), lastViewedMapWasCurrentMap)
-    CheckMap()
+    if WorldMapFrame:IsShown() then
+      -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil.GetDisplayableMapForPlayer(), lastViewedMapWasCurrentMap)
+      CheckMap()
+    end
   end
 )
 
+-- Some map changes (especially when moving out of any zone, so the map shows the whole continent)
+-- are not accompanied by any event. So we just check repeatedly.
+local function TimedUpdate()
+  if WorldMapFrame:IsShown() then
+    CheckMap()
+  end
+end
+C_Timer.NewTicker(1, TimedUpdate)
 
 
 
 
--- During combat, the OnClick functions of the dungeon/boss pins do not manage
--- to bring up EncounterJournal, which is why we apply this workaround.
+
+
+
+-- During combat, the OnClick functions of the dungeon/boss pins do not work due to taint,
+-- which is why we are emulating their behaviour manually.
 local function HookPins()
 
   if WorldMapFrame.ScrollContainer.Child then
@@ -274,20 +399,43 @@ local function HookPins()
         local OriginalOnClick = v.OnClick
         v.OnClick = function(...)
 
+          local _, button = ...
+          -- Got to save pinTemplate, because it might be gone after we do SetMapID() below.
+          local pinTemplate = v.pinTemplate
+
           if InCombatLockdown() then
+
             -- Actually not needed, because OriginalOnClick() will take care of this.
             -- if instanceID then  EncounterJournal_DisplayInstance(instanceID) end
             -- if encounterID then EncounterJournal_DisplayEncounter(encounterID) end
 
-            if not EncounterJournal:IsShown() then
-              EncounterJournal:Show()
-            else
-              EncounterJournal:Raise()
+            -- For EncounterJournalPinTemplate, only the left button opens EncounterJournal.
+            -- For DungeonEntrancePinTemplate, only the right button opens EncounterJournal.
+            if (pinTemplate == "EncounterJournalPinTemplate" and button == "LeftButton") or (pinTemplate == "DungeonEntrancePinTemplate" and button == "RightButton") then
+              if not EncounterJournal:IsShown() then
+                EncounterJournal:Show()
+              else
+                EncounterJournal:Raise()
+              end
+
+            -- For EncounterJournalPinTemplate the right click changes the map to the parent map.
+            -- As this is tainted during combat lockdown, we have to do it manually.
+            elseif (pinTemplate == "EncounterJournalPinTemplate" and button == "RightButton") then
+              local mapInfo = C_Map.GetMapInfo(WorldMapFrame:GetMapID())
+              if mapInfo.parentMapID then
+                WorldMapFrame:SetMapID(mapInfo.parentMapID)
+              end
             end
 
+            -- Only original-click for the un-tainted clicks.
+            if (pinTemplate ~= "EncounterJournalPinTemplate" or button ~= "RightButton") then
+              OriginalOnClick(...)
+            end
+
+          else
+            OriginalOnClick(...)
           end
 
-          OriginalOnClick(...)
         end
 
         v.pwm_alreadyHooked = true
@@ -393,10 +541,13 @@ end
 
 local function CloseWorldMapFrame(orReset)
   if WorldMapFrame:IsShown() then
+
+    -- During combat, we cannot use HideUIPanel(WorldMapFrame).
     if InCombatLockdown() then
 
       -- WorldMapFrame:Hide() will lead to ToggleGameMenu() not working any more
       -- because WorldMapFrame will still be listed in UIParent's FramePositionDelegate.
+      -- Blizzard_UIParentPanelManager/Mainline\UIParentPanelManager.lua, L871
       -- So we only hide it, if WorldMapFrame is not in UIPanelWindows (e.g. Mapster).
       if not UIPanelWindows["WorldMapFrame"] then
         WorldMapFrame:Hide()
@@ -493,18 +644,6 @@ startupFrame:SetScript("OnEvent", function(_, _, isLogin, isReload)
     CloseEncounterJournal()
     CloseQuestLogPopupDetailFrame()
   end)
-
-
-  -- Some map changes (especially when moving out of any zone, so the map shows the whole continent)
-  -- are not accompanied by any event. So we just check repeatedly.
-  local function TimedUpdate()
-    if WorldMapFrame:IsShown() then
-      CheckMap()
-    end
-    C_Timer.After(1, TimedUpdate)
-  end
-  TimedUpdate()
-
 
 
   -- Put the recenter button below the map pin button.
