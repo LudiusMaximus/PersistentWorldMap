@@ -4,6 +4,11 @@
 -- Preventing taint!
 -- #####################################################
 
+-- To do a WorldMapFrame:OnMapChanged() again when combat ends.
+-- Just in case this might be important.
+local reloadAfterCombat = false
+
+
 -- Overriding Blizzard_SharedMapDataProviders/SharedMapPoiTemplates.lua, L518
 function SuperTrackablePinMixin:OnAcquired(...)
   if not self:IsSuperTrackingExternallyHandled() then
@@ -11,6 +16,8 @@ function SuperTrackablePinMixin:OnAcquired(...)
     -- Ludius change to prevnt taint:
     if not InCombatLockdown() then
       self:UpdateMousePropagation();
+    else
+      reloadAfterCombat = true
     end
 
     self:UpdateSuperTrackedState(C_SuperTrack[self:GetSuperTrackAccessorAPIName()]());
@@ -89,6 +96,8 @@ do
     -- Ludius change to prevnt taint:
     if not InCombatLockdown() then
       pin:CheckMouseButtonPassthrough("RightButton");
+    else
+      reloadAfterCombat = true
     end
 
     self:RegisterPin(pin);
@@ -98,8 +107,15 @@ do
 end
 
 
-
-
+-- No idea if we need this. But better be on the safe side.
+local leaveCombatFrame = CreateFrame("Frame")
+leaveCombatFrame:RegisterEvent("PLAYER_LEAVE_COMBAT")
+leaveCombatFrame:SetScript("OnEvent", function()
+  if reloadAfterCombat and WorldMapFrame:IsShown() then
+    WorldMapFrame:OnMapChanged()
+  end
+  reloadAfterCombat = false
+end)
 
 
 
@@ -116,6 +132,8 @@ local WorldMapFrame = _G.WorldMapFrame
 -- Forward declaration
 local CheckMap
 
+-- Flag to prevent saving before map was first shown.
+local firstShownAfterLogin = false
 
 local lastMapID   = nil
 local lastScale   = nil
@@ -132,12 +150,14 @@ local resetMapAfter = 15
 local lastViewedMapWasCurrentMap = false
 
 
-local function SafeMapState()
+local function SaveMapState()
+  if not firstShownAfterLogin then return end
+
   lastMapID   = WorldMapFrame:GetMapID()
   lastScale   = WorldMapFrame.ScrollContainer.currentScale
   lastScrollX = WorldMapFrame.ScrollContainer.currentScrollX
   lastScrollY = WorldMapFrame.ScrollContainer.currentScrollY
-  -- print("saving", lastMapID, lastScale, lastScrollX, lastScrollY)
+  print("saving", lastMapID, lastScale, lastScrollX, lastScrollY)
 end
 
 
@@ -183,6 +203,11 @@ end
 -- because it gets called too early.)
 local function RestoreMap()
   if WorldMapFrame:IsShown() then
+  
+    if not firstShownAfterLogin then
+      firstShownAfterLogin = true
+    end
+  
     -- print("Post Hook after showing", GetTime(), lastMapCloseTime, GetTime() - lastMapCloseTime, resetMapAfter)
     if GetTime() - lastMapCloseTime > resetMapAfter then
       lastMapID = nil
@@ -205,20 +230,20 @@ local OtherWorldMapFrameOnHideScripts = WorldMapFrame.ScrollContainer:GetScript(
 WorldMapFrame.ScrollContainer:SetScript("OnHide", function(self, ...)
   -- print("Prehook before Hiding")
   lastMapCloseTime = GetTime()
-  SafeMapState()
+  SaveMapState()
   OtherWorldMapFrameOnHideScripts(self, ...)
 end)
 
 -- Also got to store and restore when the SidePanelToggle is shown or hidden.
 local OtherCloseButtonScripts = WorldMapFrame.SidePanelToggle.CloseButton:GetScript("OnClick")
 WorldMapFrame.SidePanelToggle.CloseButton:SetScript("OnClick", function(self, ...)
-  SafeMapState()
+  SaveMapState()
   OtherCloseButtonScripts(self, ...)
   RestoreMapState()
 end)
 local OtherOpenButtonScripts = WorldMapFrame.SidePanelToggle.OpenButton:GetScript("OnClick")
 WorldMapFrame.SidePanelToggle.OpenButton:SetScript("OnClick", function(self, ...)
-  SafeMapState()
+  SaveMapState()
   OtherOpenButtonScripts(self, ...)
   RestoreMapState()
 end)
@@ -237,7 +262,7 @@ local function ResetMap()
     WorldMapFrame:ResetZoom()
   end
 
-  SafeMapState()
+  SaveMapState()
 
   WorldMapFrame:OnMapChanged()
 end
@@ -657,21 +682,8 @@ startupFrame:SetScript("OnEvent", function(_, _, isLogin, isReload)
   end
   CreateRecenterButton(mapPinButton)
 
+  -- TODO: Try if this allows us to hide the world map during combat lockdown:
+  -- purgeKey(UIPanelWindows, "WorldMapFrame")
+  -- table.insert(UISpecialFrames, "WorldMapFrame")
+
 end)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
