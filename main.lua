@@ -157,7 +157,7 @@ local function SaveMapState()
   lastScale   = WorldMapFrame.ScrollContainer.currentScale
   lastScrollX = WorldMapFrame.ScrollContainer.currentScrollX
   lastScrollY = WorldMapFrame.ScrollContainer.currentScrollY
-  print("saving", lastMapID, lastScale, lastScrollX, lastScrollY)
+  -- print("saving", lastMapID, lastScale, lastScrollX, lastScrollY)
 end
 
 
