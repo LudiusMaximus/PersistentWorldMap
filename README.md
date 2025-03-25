@@ -1,2 +1,2 @@
 # PersistentWorldMap
-A WoW addon that maintains the World Map's current zoom and pan when closing and reopening it.
+A WoW addon enabling the world map to automatically switch to current zone and maintain zoom/pan when closing and reopening map.
