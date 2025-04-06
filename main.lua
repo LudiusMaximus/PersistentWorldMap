@@ -618,7 +618,11 @@ end
 local startupFrame = CreateFrame("Frame")
 startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 startupFrame:SetScript("OnEvent", function(_, _, isLogin, isReload)
-  if not isLogin and not isReload then return end
+
+  if not isLogin and not isReload then
+    lastMapID = nil
+    return
+  end
 
   -- Needed for the boss pins to work in combat lockdown.
   if not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
