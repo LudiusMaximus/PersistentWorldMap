@@ -1,4 +1,8 @@
 
+-- Forward declaration
+local CheckMap
+local StopPlayerPings
+
 
 -- #####################################################
 -- Preventing taint!
@@ -113,6 +117,7 @@ leaveCombatFrame:RegisterEvent("PLAYER_LEAVE_COMBAT")
 leaveCombatFrame:SetScript("OnEvent", function()
   if reloadAfterCombat and WorldMapFrame:IsShown() then
     WorldMapFrame:OnMapChanged()
+    StopPlayerPings()
   end
   reloadAfterCombat = false
 end)
@@ -128,9 +133,6 @@ local MapUtil       = _G.MapUtil
 local WorldMapFrame = _G.WorldMapFrame
 
 
-
--- Forward declaration
-local CheckMap
 
 -- Flag to prevent saving before map was first shown.
 local firstShownAfterLogin = false
@@ -150,6 +152,27 @@ local resetMapAfter = 15
 local lastViewedMapWasCurrentMap = false
 
 
+
+-- To prevent player pin pings when we don't need them.
+-- Forward declaration above.
+StopPlayerPings = function()
+  for k, _ in pairs(WorldMapFrame.dataProviders) do
+    if type(k) == "table" and k.GetMap and k.ShouldShowUnit then
+      -- print("Found GroupMembersDataProvider.")
+      if k.pin and k.pin.StartPlayerPing then
+        k.pin:StopPlayerPing()
+        -- Got to call this to prevent pin size flicker.
+        k.pin:SynchronizePinSizes()
+        
+        -- If you ever want to start the ping. (Arguments are duration and fade-out duration.)
+        -- k.pin:StartPlayerPing(2, .25)
+      end
+    end
+  end
+end
+
+
+
 local function SaveMapState()
   if not firstShownAfterLogin then return end
 
@@ -158,6 +181,10 @@ local function SaveMapState()
   lastScrollX = WorldMapFrame.ScrollContainer.currentScrollX
   lastScrollY = WorldMapFrame.ScrollContainer.currentScrollY
   -- print("saving", lastMapID, lastScale, lastScrollX, lastScrollY)
+
+  -- WorldMapFrame.ScrollContainer.currentScrollX is the same as WorldMapFrame.ScrollContainer:GetNormalizedHorizontalScroll()
+  -- WorldMapFrame.ScrollContainer.currentScrollY is the same as WorldMapFrame.ScrollContainer:GetNormalizedVerticalScroll()
+
 end
 
 
@@ -166,6 +193,8 @@ local function RestoreMapState()
   if lastMapID and lastScale and lastScrollX and lastScrollY then
     -- print("restoring", lastMapID, lastScale, lastScrollX, lastScrollY)
 
+
+    -- WorldMapFrame:SetMapID(lastMapID)
     -- Content of WorldMapFrame:SetMapID(lastMapID) separated:
     local mapArtID = C_Map.GetMapArtID(lastMapID)
     if WorldMapFrame.mapID ~= lastMapID or WorldMapFrame.mapArtID ~= mapArtID then
@@ -203,11 +232,11 @@ end
 -- because it gets called too early.)
 local function RestoreMap()
   if WorldMapFrame:IsShown() then
-  
+
     if not firstShownAfterLogin then
       firstShownAfterLogin = true
     end
-  
+
     -- print("Post Hook after showing", GetTime(), lastMapCloseTime, GetTime() - lastMapCloseTime, resetMapAfter)
     if GetTime() - lastMapCloseTime > resetMapAfter then
       lastMapID = nil
@@ -236,16 +265,18 @@ end)
 
 -- Also got to store and restore when the SidePanelToggle is shown or hidden.
 local OtherCloseButtonScripts = WorldMapFrame.SidePanelToggle.CloseButton:GetScript("OnClick")
-WorldMapFrame.SidePanelToggle.CloseButton:SetScript("OnClick", function(self, ...)
+WorldMapFrame.SidePanelToggle.CloseButton:SetScript("OnClick", function(...)
   SaveMapState()
-  OtherCloseButtonScripts(self, ...)
+  OtherCloseButtonScripts(...)
   RestoreMapState()
+  StopPlayerPings()
 end)
 local OtherOpenButtonScripts = WorldMapFrame.SidePanelToggle.OpenButton:GetScript("OnClick")
-WorldMapFrame.SidePanelToggle.OpenButton:SetScript("OnClick", function(self, ...)
+WorldMapFrame.SidePanelToggle.OpenButton:SetScript("OnClick", function(...)
   SaveMapState()
-  OtherOpenButtonScripts(self, ...)
+  OtherOpenButtonScripts(...)
   RestoreMapState()
+  StopPlayerPings()
 end)
 
 
@@ -270,7 +301,7 @@ end
 
 -- Shift click the map to reset it!
 local resetMap = false
-WorldMapFrame.ScrollContainer:HookScript("OnMouseDown", function(self)
+WorldMapFrame.ScrollContainer:HookScript("OnMouseDown", function()
   if IsShiftKeyDown() then
     ResetMap()
     resetMap = true
@@ -280,7 +311,7 @@ WorldMapFrame.ScrollContainer:HookScript("OnMouseDown", function(self)
 end)
 -- Got to do this because otherwise the map of the cursor position gets
 -- loaded when releasing the mouse button.
-WorldMapFrame.ScrollContainer:HookScript("OnMouseUp", function(self)
+WorldMapFrame.ScrollContainer:HookScript("OnMouseUp", function()
   if resetMap then
     ResetMap()
     resetMap = false
