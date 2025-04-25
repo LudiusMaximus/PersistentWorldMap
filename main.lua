@@ -1,7 +1,7 @@
 
 -- Forward declaration
 local CheckMap
-local StopPlayerPings
+local PlayerPingAnimation
 
 
 -- #####################################################
@@ -117,7 +117,7 @@ leaveCombatFrame:RegisterEvent("PLAYER_LEAVE_COMBAT")
 leaveCombatFrame:SetScript("OnEvent", function()
   if reloadAfterCombat and WorldMapFrame:IsShown() then
     WorldMapFrame:OnMapChanged()
-    StopPlayerPings()
+    PlayerPingAnimation(false)
   end
   reloadAfterCombat = false
 end)
@@ -126,11 +126,31 @@ end)
 
 
 
+-- Locals for frequently used global functions.
+local C_Map_GetMapArtID                  = _G.C_Map.GetMapArtID
+local C_Map_GetMapInfo                   = _G.C_Map.GetMapInfo
+local C_Map_GetPlayerMapPosition         = _G.C_Map.GetPlayerMapPosition
+local MapUtil_GetDisplayableMapForPlayer = _G.MapUtil.GetDisplayableMapForPlayer
 
-local C_Map         = _G.C_Map
-local GetTime       = _G.GetTime
-local MapUtil       = _G.MapUtil
-local WorldMapFrame = _G.WorldMapFrame
+local Clamp                     = _G.Clamp
+local GetTime                   = _G.GetTime
+local WorldMapFrame             = _G.WorldMapFrame
+
+local IsShiftKeyDown            = _G.IsShiftKeyDown
+local GameTooltip_SetTitle      = _G.GameTooltip_SetTitle
+local GameTooltip_AddNormalLine = _G.GameTooltip_AddNormalLine
+local GameTooltip_AddErrorLine  = _G.GameTooltip_AddErrorLine
+local GetScaledCursorPosition   = _G.GetScaledCursorPosition
+
+
+
+-- TODO: Make optional.
+local RESET_MAP_AFTER = 15
+local DOUBLE_CLICK_TIME = 0.25
+
+
+-- TODO: Store in saved variable
+local autoCentering = false
 
 
 
@@ -144,7 +164,7 @@ local lastScrollY = nil
 
 -- Only store the last map for a short time.
 local lastMapCloseTime = GetTime()
-local resetMapAfter = 15
+
 
 -- If the last viewed map was the map in which the player was,
 -- we want the map to automatically change to the new map;
@@ -155,19 +175,32 @@ local lastViewedMapWasCurrentMap = false
 
 -- To prevent player pin pings when we don't need them.
 -- Forward declaration above.
-StopPlayerPings = function()
-  for k, _ in pairs(WorldMapFrame.dataProviders) do
-    if type(k) == "table" and k.GetMap and k.ShouldShowUnit then
-      -- print("Found GroupMembersDataProvider.")
-      if k.pin and k.pin.StartPlayerPing then
-        k.pin:StopPlayerPing()
-        -- Got to call this to prevent pin size flicker.
-        k.pin:SynchronizePinSizes()
-        
-        -- If you ever want to start the ping. (Arguments are duration and fade-out duration.)
-        -- k.pin:StartPlayerPing(2, .25)
+local playerPin = nil
+PlayerPingAnimation = function(start)
+
+  -- If we do not have the player pin yet, search it.
+  if not playerPin or not playerPin.ShouldShowUnit or not playerPin:ShouldShowUnit("player") then
+    playerPin = nil
+    for k, _ in pairs(WorldMapFrame.dataProviders) do
+      if type(k) == "table" and k.GetMap and k.ShouldShowUnit then
+        -- print("Found GroupMembersDataProvider.")
+        if k:ShouldShowUnit("player") then
+          playerPin = k
+          break
+        end
       end
     end
+  end
+
+  if playerPin then
+    if start then
+      -- Arguments are duration and fade-out duration.
+      playerPin.pin:StartPlayerPing(2, .25)
+    else
+      playerPin.pin:StopPlayerPing(2, .25)
+    end
+    -- Got to call this to prevent pin size flicker.
+    playerPin.pin:SynchronizePinSizes()
   end
 end
 
@@ -176,14 +209,26 @@ end
 local function SaveMapState()
   if not firstShownAfterLogin then return end
 
+  local mapID = WorldMapFrame:GetMapID()
+  if not mapID then
+    lastMapID   = nil
+    lastScale   = nil
+    lastScrollX = nil
+    lastScrollY = nil
+    return
+  end
+
   lastMapID   = WorldMapFrame:GetMapID()
   lastScale   = WorldMapFrame.ScrollContainer.currentScale
   lastScrollX = WorldMapFrame.ScrollContainer.currentScrollX
   lastScrollY = WorldMapFrame.ScrollContainer.currentScrollY
   -- print("saving", lastMapID, lastScale, lastScrollX, lastScrollY)
 
-  -- WorldMapFrame.ScrollContainer.currentScrollX is the same as WorldMapFrame.ScrollContainer:GetNormalizedHorizontalScroll()
-  -- WorldMapFrame.ScrollContainer.currentScrollY is the same as WorldMapFrame.ScrollContainer:GetNormalizedVerticalScroll()
+  -- These values are the same as obtained by these functions.
+  -- see \Interface\AddOns\Blizzard_MapCanvas\MapCanvas_ScrollContainerMixin.lua
+  -- WorldMapFrame.ScrollContainer.currentScale   == WorldMapFrame.ScrollContainer:GetCanvasScale()
+  -- WorldMapFrame.ScrollContainer.currentScrollX == WorldMapFrame.ScrollContainer:GetNormalizedHorizontalScroll()
+  -- WorldMapFrame.ScrollContainer.currentScrollY == WorldMapFrame.ScrollContainer:GetNormalizedVerticalScroll()
 
 end
 
@@ -193,31 +238,31 @@ local function RestoreMapState()
   if lastMapID and lastScale and lastScrollX and lastScrollY then
     -- print("restoring", lastMapID, lastScale, lastScrollX, lastScrollY)
 
-
     -- WorldMapFrame:SetMapID(lastMapID)
     -- Content of WorldMapFrame:SetMapID(lastMapID) separated:
-    local mapArtID = C_Map.GetMapArtID(lastMapID)
+    local mapArtID = C_Map_GetMapArtID(lastMapID)
     if WorldMapFrame.mapID ~= lastMapID or WorldMapFrame.mapArtID ~= mapArtID then
-      WorldMapFrame.areDetailLayersDirty = true;
-      WorldMapFrame.mapID = lastMapID;
-      WorldMapFrame.mapArtID = mapArtID;
-      WorldMapFrame.expandedMapInsetsByMapID = {};
-      WorldMapFrame.ScrollContainer:SetMapID(lastMapID);
+      WorldMapFrame.areDetailLayersDirty = true
+      WorldMapFrame.mapID = lastMapID
+      WorldMapFrame.mapArtID = mapArtID
+      WorldMapFrame.expandedMapInsetsByMapID = {}
+      WorldMapFrame.ScrollContainer:SetMapID(lastMapID)
       if WorldMapFrame:IsShown() then
-        WorldMapFrame:RefreshDetailLayers();
+        WorldMapFrame:RefreshDetailLayers()
       end
     end
 
-    lastViewedMapWasCurrentMap = (lastMapID == MapUtil.GetDisplayableMapForPlayer())
+    lastViewedMapWasCurrentMap = (lastMapID == MapUtil_GetDisplayableMapForPlayer())
 
-    WorldMapFrame.ScrollContainer.currentScale = lastScale
-    WorldMapFrame.ScrollContainer.targetScale = lastScale
 
-    WorldMapFrame.ScrollContainer.currentScrollX = lastScrollX
-    WorldMapFrame.ScrollContainer.targetScrollX = lastScrollX
-
-    WorldMapFrame.ScrollContainer.currentScrollY = lastScrollY
-    WorldMapFrame.ScrollContainer.targetScrollY = lastScrollY
+    WorldMapFrame.ScrollContainer:InstantPanAndZoom(lastScale, lastScrollX, lastScrollY, true)
+    -- -- Alternative:
+    -- WorldMapFrame.ScrollContainer.currentScale = lastScale
+    -- WorldMapFrame.ScrollContainer.targetScale = lastScale
+    -- WorldMapFrame.ScrollContainer.currentScrollX = lastScrollX
+    -- WorldMapFrame.ScrollContainer.targetScrollX = lastScrollX
+    -- WorldMapFrame.ScrollContainer.currentScrollY = lastScrollY
+    -- WorldMapFrame.ScrollContainer.targetScrollY = lastScrollY
 
     WorldMapFrame:OnMapChanged()
 
@@ -237,12 +282,15 @@ local function RestoreMap()
       firstShownAfterLogin = true
     end
 
-    -- print("Post Hook after showing", GetTime(), lastMapCloseTime, GetTime() - lastMapCloseTime, resetMapAfter)
-    if GetTime() - lastMapCloseTime > resetMapAfter then
+    -- print("Post Hook after showing", GetTime(), lastMapCloseTime, GetTime() - lastMapCloseTime, RESET_MAP_AFTER)
+    if GetTime() - lastMapCloseTime > RESET_MAP_AFTER then
       lastMapID = nil
     else
       RestoreMapState()
     end
+
+    -- To refresh buttons.
+    CheckMap()
   end
 end
 
@@ -269,55 +317,47 @@ WorldMapFrame.SidePanelToggle.CloseButton:SetScript("OnClick", function(...)
   SaveMapState()
   OtherCloseButtonScripts(...)
   RestoreMapState()
-  StopPlayerPings()
+  PlayerPingAnimation(false)
 end)
 local OtherOpenButtonScripts = WorldMapFrame.SidePanelToggle.OpenButton:GetScript("OnClick")
 WorldMapFrame.SidePanelToggle.OpenButton:SetScript("OnClick", function(...)
   SaveMapState()
   OtherOpenButtonScripts(...)
   RestoreMapState()
-  StopPlayerPings()
+  PlayerPingAnimation(false)
 end)
 
 
 
-local function ResetMap()
+local function ResetMap(preserveZoom)
 
-  -- print("ResetMap", MapUtil.GetDisplayableMapForPlayer())
-  WorldMapFrame:SetMapID(MapUtil.GetDisplayableMapForPlayer())
-  local currentScale = WorldMapFrame.ScrollContainer:GetCanvasScale()
-  local currentZoomLevel = WorldMapFrame.ScrollContainer:GetZoomLevelIndexForScale(currentScale)
+  local previousScale = WorldMapFrame.ScrollContainer.currentScale
 
-  -- Got to do this to avoid funny shift of the map by 1 pixel...
-  if currentZoomLevel ~= 1 then
-    WorldMapFrame:ResetZoom()
+  -- print("ResetMap", MapUtil_GetDisplayableMapForPlayer())
+  WorldMapFrame:SetMapID(MapUtil_GetDisplayableMapForPlayer())
+
+  if preserveZoom then
+    -- print("restoring", previousScale)
+    WorldMapFrame.ScrollContainer.currentScale = previousScale
+    WorldMapFrame.ScrollContainer.targetScale = previousScale
+    WorldMapFrame:OnMapChanged()
+    PlayerPingAnimation(false)
+  else
+    WorldMapFrame:OnMapChanged()
   end
+
+
+  -- TODO Cannot reproduce this any more (April 2025). Remove if it does not come back!
+  -- -- Got to do this to avoid funny shift of the map by 1 pixel...
+  -- local currentScale = WorldMapFrame.ScrollContainer:GetCanvasScale()
+  -- local currentZoomLevel = WorldMapFrame.ScrollContainer:GetZoomLevelIndexForScale(currentScale)
+  -- print(currentScale, currentZoomLevel)
+  -- if currentZoomLevel ~= 1 then
+    -- WorldMapFrame:ResetZoom()
+  -- end
 
   SaveMapState()
-
-  WorldMapFrame:OnMapChanged()
 end
-
-
--- Shift click the map to reset it!
-local resetMap = false
-WorldMapFrame.ScrollContainer:HookScript("OnMouseDown", function()
-  if IsShiftKeyDown() then
-    ResetMap()
-    resetMap = true
-  else
-    resetMap = false
-  end
-end)
--- Got to do this because otherwise the map of the cursor position gets
--- loaded when releasing the mouse button.
-WorldMapFrame.ScrollContainer:HookScript("OnMouseUp", function()
-  if resetMap then
-    ResetMap()
-    resetMap = false
-  end
-end)
-
 
 
 
@@ -328,16 +368,19 @@ local recenterButton = nil
 
 local RecenterButtonEnterFunction = function(button)
   GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
-
-  if button:IsEnabled() then
-    GameTooltip:SetText("|cffffffffClick to re-center map\n(or shift-click on map)|r")
-  else
-    GameTooltip:SetText("|cffffffffMap already centered|r")
+  GameTooltip_SetTitle(GameTooltip, "Persistent World Map")
+  GameTooltip_AddNormalLine(GameTooltip, "Restores the map to its previous state when closing and reopenning it.")
+  GameTooltip_AddNormalLine(GameTooltip, "Automatically switches to the map of a newly entered zone.")
+  GameTooltip_AddBlankLineToTooltip(GameTooltip)
+  GameTooltip_AddInstructionLine(GameTooltip, "Click here to show the map of the current zone or just shift-click on the map.")
+  if not button:IsEnabled() then
+    GameTooltip_AddErrorLine(GameTooltip, "Already showing the map of the current zone.")
   end
+  GameTooltip:Show()
 end
 
 local function EnableRecenterButton()
-  if not recenterButton then return end
+  if not recenterButton or recenterButton:IsEnabled() then return end
   recenterButton.centerDot.t:SetVertexColor(0, 0, 0, 1)
   recenterButton:SetEnabled(true)
   if GameTooltip:GetOwner() == recenterButton then
@@ -346,7 +389,7 @@ local function EnableRecenterButton()
 end
 
 local function DisableRecenterButton()
-  if not recenterButton then return end
+  if not recenterButton or not recenterButton:IsEnabled() then return end
   recenterButton.centerDot.t:SetVertexColor(1, 0.9, 0, 1)
   recenterButton:SetEnabled(false)
   if GameTooltip:GetOwner() == recenterButton then
@@ -355,13 +398,59 @@ local function DisableRecenterButton()
 end
 
 
-local function CreateRecenterButton(anchorButton)
+
+
+local autoCenterLockButton
+
+local AutoCenterLockButtonEnterFunction = function(button)
+  GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
+  GameTooltip_SetTitle(GameTooltip, "Lock map to player")
+  GameTooltip_AddNormalLine(GameTooltip, "Automatically keep the player pin closest to the center of the map when the map is zoomed in. (Not possible in dungeons, raids, battlegrounds and arenas.)")
+  GameTooltip_AddBlankLineToTooltip(GameTooltip)
+  if button:IsEnabled() then
+    if autoCentering then
+      GameTooltip_AddInstructionLine(GameTooltip, "Click here to turn OFF\nor just drag the map.")
+    else
+      GameTooltip_AddInstructionLine(GameTooltip, "Click here to turn ON\nor just double-click on the map.")
+    end
+  else
+    GameTooltip_AddErrorLine(GameTooltip, "Not possible in this zone.")
+  end
+  GameTooltip:Show()
+end
+
+local function EnableCenterOnPlayer()
+  if autoCentering then return end
+  autoCentering = true
+  if not autoCenterLockButton then return end
+  autoCenterLockButton:GetNormalTexture():SetDesaturated(false)
+  if GameTooltip:GetOwner() == autoCenterLockButton then
+    AutoCenterLockButtonEnterFunction(autoCenterLockButton)
+  end
+  PlayerPingAnimation(true)
+end
+
+local function DisableCenterOnPlayer()
+  if not autoCentering then return end
+  autoCentering = false
+  if not autoCenterLockButton then return end
+  autoCenterLockButton:GetNormalTexture():SetDesaturated(true)
+  if GameTooltip:GetOwner() == autoCenterLockButton then
+    AutoCenterLockButtonEnterFunction(autoCenterLockButton)
+  end
+end
+
+
+
+local function CreateMapButtons(anchorButton)
+
   -- Template in RecenterButtonTemplate.xml copied from WorldMapTrackingPinButtonTemplate
   -- in Blizzard's \Interface\AddOns\Blizzard_WorldMap\Blizzard_WorldMapTemplates.xml
   recenterButton = CreateFrame("Button", nil, WorldMapFrame.ScrollContainer, "RecenterButtonTemplate")
   recenterButton:SetPoint("TOPRIGHT", anchorButton, "BOTTOMRIGHT", 0, 0)
 
   recenterButton:SetScript("OnClick", function()
+      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
       ResetMap()
       DisableRecenterButton()
     end)
@@ -369,8 +458,7 @@ local function CreateRecenterButton(anchorButton)
   recenterButton:SetScript("OnEnter", function(self)
       RecenterButtonEnterFunction(self)
     end)
-
-  recenterButton:SetScript("OnLeave", function(self)
+  recenterButton:SetScript("OnLeave", function()
       GameTooltip:Hide()
     end)
 
@@ -380,11 +468,78 @@ local function CreateRecenterButton(anchorButton)
   recenterButton.centerDot = CreateFrame("Frame", nil, recenterButton)
   local t = recenterButton.centerDot:CreateTexture(nil, "OVERLAY")
   t:SetTexture("Interface\\AddOns\\PersistentWorldMap\\dot.tga")
-	t:SetPoint("CENTER", recenterButton, "CENTER", 0.3, 0.5)
+  t:SetPoint("CENTER", recenterButton, "CENTER", 0.3, 0.5)
   t:SetSize(10, 10)
   recenterButton.centerDot.t = t
 
   DisableRecenterButton()
+
+
+
+
+
+  -- Add the "lock to player position" button.
+  autoCenterLockButton = CreateFrame("Button", nil, recenterButton)
+  autoCenterLockButton:SetSize(18, 21)
+  autoCenterLockButton:SetPoint("CENTER", recenterButton, "BOTTOMRIGHT", -4, 7)
+
+  -- To get an OnEnter tooltip while disabled.
+  autoCenterLockButton:SetMotionScriptsWhileDisabled(true)
+
+  autoCenterLockButton:SetNormalAtlas("Monuments-Lock")
+  autoCenterLockButton:SetPushedAtlas("Monuments-Lock")
+  autoCenterLockButton:SetHighlightAtlas("bountiful-glow", "BLEND")
+
+  if not autoCentering then
+    autoCenterLockButton:GetNormalTexture():SetDesaturated(true)
+  end
+
+  -- Create the disabled overlay texture that will be layered on top.
+  autoCenterLockButton.disabledTexture = autoCenterLockButton:CreateTexture(nil, "OVERLAY")
+  autoCenterLockButton.disabledTexture:SetAtlas("talents-button-reset", "BLEND")
+  autoCenterLockButton.disabledTexture:SetPoint("CENTER", autoCenterLockButton, "CENTER", 0, -3)
+  autoCenterLockButton.disabledTexture:SetSize(16, 16)
+  autoCenterLockButton.disabledTexture:SetAlpha(0.7)
+  autoCenterLockButton.disabledTexture:Hide()
+
+  -- Override the default disabled state.
+  autoCenterLockButton:SetScript("OnDisable", function(self)
+    self:GetNormalTexture():SetDesaturated(true)
+    self.disabledTexture:Show()
+    if GameTooltip:GetOwner() == self then
+      AutoCenterLockButtonEnterFunction(self)
+    end
+  end)
+
+  autoCenterLockButton:SetScript("OnEnable", function(self)
+    self.disabledTexture:Hide()
+    if autoCentering then
+      self:GetNormalTexture():SetDesaturated(false)
+    end
+    if GameTooltip:GetOwner() == self then
+      AutoCenterLockButtonEnterFunction(self)
+    end
+  end)
+
+  -- Handle clicks
+  autoCenterLockButton:SetScript("OnClick", function()
+    if autoCentering then
+      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+      DisableCenterOnPlayer()
+    else
+      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+      EnableCenterOnPlayer()
+    end
+  end)
+
+  -- For tooltips.
+  autoCenterLockButton:SetScript("OnEnter", function(self)
+      AutoCenterLockButtonEnterFunction(self)
+    end)
+  autoCenterLockButton:SetScript("OnLeave", function()
+      GameTooltip:Hide()
+    end)
+
 end
 
 
@@ -392,14 +547,28 @@ end
 
 -- Forward declaration above.
 CheckMap = function()
-  if WorldMapFrame:GetMapID() ~= MapUtil.GetDisplayableMapForPlayer() then
+
+  local currentMap = MapUtil_GetDisplayableMapForPlayer()
+
+  if WorldMapFrame:GetMapID() ~= currentMap then
     if lastViewedMapWasCurrentMap then
-      ResetMap()
+      -- If autoCentering is active, we want to preserve the zoom level.
+      ResetMap(autoCentering)
     else
       EnableRecenterButton()
     end
   else
     DisableRecenterButton()
+  end
+
+  if not C_Map_GetPlayerMapPosition(currentMap, "player") then
+    if autoCenterLockButton:IsEnabled() then
+      autoCenterLockButton:SetEnabled(false)
+    end
+  else
+    if not autoCenterLockButton:IsEnabled() then
+      autoCenterLockButton:SetEnabled(true)
+    end
   end
 end
 
@@ -417,7 +586,7 @@ zoneChangeFrame:RegisterEvent("AREA_POIS_UPDATED")
 zoneChangeFrame:SetScript("OnEvent",
   function(_, event, ...)
     if WorldMapFrame:IsShown() then
-      -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil.GetDisplayableMapForPlayer(), lastViewedMapWasCurrentMap)
+      -- print(event, ":", GetZoneText(), GetSubZoneText(), WorldMapFrame:GetMapID(), MapUtil_GetDisplayableMapForPlayer(), lastViewedMapWasCurrentMap)
       CheckMap()
     end
   end
@@ -430,9 +599,23 @@ local function TimedUpdate()
     CheckMap()
   end
 end
-C_Timer.NewTicker(1, TimedUpdate)
 
+local updateTimer
+local function StartMapUpdates()
+  if updateTimer then return end
+  updateTimer = C_Timer.NewTicker(1, TimedUpdate)
+end
 
+local function StopMapUpdates()
+  if updateTimer then
+    updateTimer:Cancel()
+    updateTimer = nil
+  end
+end
+
+-- Use in OnShow/OnHide
+WorldMapFrame:HookScript("OnShow", StartMapUpdates)
+WorldMapFrame:HookScript("OnHide", StopMapUpdates)
 
 
 
@@ -443,7 +626,7 @@ C_Timer.NewTicker(1, TimedUpdate)
 local function HookPins()
 
   if WorldMapFrame.ScrollContainer.Child then
-    local kids = { WorldMapFrame.ScrollContainer.Child:GetChildren() };
+    local kids = { WorldMapFrame.ScrollContainer.Child:GetChildren() }
     for _, v in ipairs(kids) do
       -- print("pinTemplate", v.pinTemplate, v.instanceID, v.journalInstanceID)
 
@@ -477,7 +660,7 @@ local function HookPins()
             -- For EncounterJournalPinTemplate the right click changes the map to the parent map.
             -- As this is tainted during combat lockdown, we have to do it manually.
             elseif (pinTemplate == "EncounterJournalPinTemplate" and button == "RightButton") then
-              local mapInfo = C_Map.GetMapInfo(WorldMapFrame:GetMapID())
+              local mapInfo = C_Map_GetMapInfo(WorldMapFrame:GetMapID())
               if mapInfo.parentMapID then
                 WorldMapFrame:SetMapID(mapInfo.parentMapID)
               end
@@ -503,11 +686,11 @@ end
 
 hooksecurefunc(WorldMapFrame, "SetMapID",
   function(self, mapID)
-    -- print("SetMapID", mapID, MapUtil.GetDisplayableMapForPlayer())
+    -- print("SetMapID", mapID, MapUtil_GetDisplayableMapForPlayer())
 
     if WorldMapFrame:IsShown() then
-      lastViewedMapWasCurrentMap = (mapID == MapUtil.GetDisplayableMapForPlayer())
-      if mapID ~= MapUtil.GetDisplayableMapForPlayer() then
+      lastViewedMapWasCurrentMap = (mapID == MapUtil_GetDisplayableMapForPlayer())
+      if not lastViewedMapWasCurrentMap then
         EnableRecenterButton()
       else
         DisableRecenterButton()
@@ -715,10 +898,217 @@ startupFrame:SetScript("OnEvent", function(_, _, isLogin, isReload)
       mapPinButton = child
     end
   end
-  CreateRecenterButton(mapPinButton)
+  CreateMapButtons(mapPinButton)
 
   -- TODO: Try if this allows us to hide the world map during combat lockdown:
   -- purgeKey(UIPanelWindows, "WorldMapFrame")
   -- table.insert(UISpecialFrames, "WorldMapFrame")
 
 end)
+
+
+
+
+
+-- Disable center on player when trying to drag the map.
+-- Enable when double-clicking the map.
+
+local isMouseDown = false
+local lastCursorX = nil
+local lastCursorY = nil
+
+-- For double click detection
+local lastClickTime = 0
+
+-- Shift click the map to reset it!
+local resetMap = false
+
+
+WorldMapFrame.ScrollContainer:HookScript("OnMouseDown", function(self, button)
+  if button == "LeftButton" then
+    isMouseDown = true
+    lastCursorX, lastCursorY = GetScaledCursorPosition()
+
+
+    if self:CanPan() then
+      -- Immediately set target scale to current scale to stop any zoom animation.
+      self.targetScale = self:GetCanvasScale()
+      self.currentScale = self.targetScale
+    end
+
+
+    if IsShiftKeyDown() then
+      ResetMap()
+      resetMap = true
+    else
+      resetMap = false
+    end
+
+  end
+end)
+
+WorldMapFrame.ScrollContainer:HookScript("OnMouseUp", function(self, button)
+  if button == "LeftButton" then
+    isMouseDown = false
+
+    -- Check for double click
+    local currentTime = GetTime()
+    if currentTime - lastClickTime < DOUBLE_CLICK_TIME then
+      EnableCenterOnPlayer()
+    end
+    lastClickTime = currentTime
+
+    -- Got to do this because otherwise the map of the cursor position gets
+    -- loaded when releasing the mouse button.
+    if resetMap then
+      ResetMap()
+      PlayerPingAnimation(false)
+      resetMap = false
+    end
+  end
+end)
+
+
+
+WorldMapFrame.ScrollContainer:HookScript("OnUpdate", function(self)
+  -- Disable auto-centering when player starts to drag.
+  if isMouseDown then
+    local cursorX, cursorY = GetScaledCursorPosition()
+    if cursorX ~= lastCursorX or cursorY ~= lastCursorY then
+      DisableCenterOnPlayer()
+    end
+  end
+
+  -- Ensure that targetScale exists. Not checking this sometimes caused an error when changing into a zone with loading screen.
+  if not self.targetScale then return end
+
+  -- Ensure scroll extents are initialized. Has not caused issues so far, but you never know.
+  if not self.scrollXExtentsMin or not self.scrollXExtentsMax or
+     not self.scrollYExtentsMin or not self.scrollYExtentsMax then
+    return
+  end
+
+  -- Auto Centering.
+  if autoCentering then
+
+    local playerPos = C_Map_GetPlayerMapPosition(self:GetParent():GetMapID(), "player")
+    if not playerPos then return end
+
+    local playerPosX, playerPosY = playerPos:GetXY()
+    playerPosX = Clamp(playerPosX, self.scrollXExtentsMin, self.scrollXExtentsMax)
+    playerPosY = Clamp(playerPosY, self.scrollYExtentsMin, self.scrollYExtentsMax)
+
+    local currentScale = self:GetCanvasScale()
+
+    -- Do this while zooming to keep borders of map and frame aligned.
+    if self.targetScale < currentScale or currentScale < self.targetScale then
+      -- currentScrollX and targetScrollX are not set by SetNormalizedHorizontalScroll()
+      -- so we have to set them manually to prevent the map jumping back after auto-centering was disabled.
+      if self.currentScrollX ~= playerPosX then
+        self.currentScrollX = playerPosX
+        self.targetScrollX = playerPosX
+        self:SetNormalizedHorizontalScroll(playerPosX)
+      end
+      if self.currentScrollY ~= playerPosY then
+        self.currentScrollY = playerPosY
+        self.targetScrollY = playerPosY
+        self:SetNormalizedVerticalScroll(playerPosY)
+      end
+    -- Do this while not zooming to smoothly move to the player's position.
+    else
+      self:SetPanTarget(playerPosX, playerPosY)
+    end
+
+  -- If not auto-centering, we just want to make sure that zooming out does not go beyond the map boundaries.
+  else
+
+    -- Only needed for zooming out.
+    if self.targetScale < self:GetCanvasScale() then
+      local limitedX = Clamp(self:GetCurrentScrollX(), self.scrollXExtentsMin, self.scrollXExtentsMax)
+      local limitedY = Clamp(self:GetCurrentScrollY(), self.scrollYExtentsMin, self.scrollYExtentsMax)
+      if self.currentScrollX ~= limitedX then
+        self.currentScrollX = limitedX
+        self.targetScrollX = limitedX
+        self:SetNormalizedHorizontalScroll(limitedX)
+      end
+      if self.currentScrollY ~= limitedY then
+        self.currentScrollY = limitedY
+        self.targetScrollY = limitedY
+        self:SetNormalizedVerticalScroll(limitedY)
+      end
+    end
+
+  end
+
+end)
+
+
+
+
+
+-- Enable smooth zoom mode.
+WorldMapFrame.ScrollContainer:SetMouseWheelZoomMode(MAP_CANVAS_MOUSE_WHEEL_ZOOM_BEHAVIOR_SMOOTH)
+
+-- Could be used to customize zoom speed (default 0.15)
+WorldMapFrame.ScrollContainer.normalizedZoomLerpAmount = 0.25
+
+
+-- Hook mouse wheel for custom zoom behavior.
+WorldMapFrame.ScrollContainer:HookScript("OnMouseWheel", function(self, delta)
+
+  -- If already zoomed out, we stay at the center and are done!
+  if delta < 0 and self:IsAtMinZoom() then
+    self:SetPanTarget(0.5, 0.5)
+    return
+  end
+  -- For all other cases we have to dynamically calcualte the pan boundaries based on the target scale.
+
+  -- We could do it like MapCanvasScrollControllerMixin:OnMouseWheel()
+  -- but this behaves differently on different maps.
+  -- local targetScale = currentScale + self.zoomAmountPerMouseWheelDelta * delta
+
+  -- So instead, we use the ScrollContainer's zoom levels to determine the target scale.
+  local currentScale = self:GetCanvasScale()
+  local currentZoomLevelScale = self.zoomLevels[self:GetZoomLevelIndexForScale(currentScale)].scale
+  local nextZoomOutLevelScale, nextZoomInLevelScale = self:GetCurrentZoomRange()
+  -- print(nextZoomOutLevelScale, currentZoomLevelScale, nextZoomInLevelScale)
+
+  local scaleStep
+  if currentZoomLevelScale == nextZoomOutLevelScale then
+    scaleStep = math.abs(currentZoomLevelScale - nextZoomInLevelScale)
+  elseif currentZoomLevelScale == nextZoomInLevelScale then
+    scaleStep = math.abs(currentZoomLevelScale - nextZoomOutLevelScale)
+  elseif currentScale < currentZoomLevelScale then
+    scaleStep = math.abs(currentZoomLevelScale - nextZoomOutLevelScale)
+  else
+    scaleStep = math.abs(currentZoomLevelScale - nextZoomInLevelScale)
+  end
+  -- TODO: Use self.zoomAmountPerMouseWheelDelta (default 0.075) or your own variable as a factor for targetScale.
+  local targetScale = currentScale + scaleStep * delta
+  targetScale = Clamp(
+    targetScale,
+    self:GetScaleForMinZoom(),
+    self:GetScaleForMaxZoom()
+  )
+  -- Override the zoom target set by the original OnMouseWheel.
+  self:SetZoomTarget(targetScale)
+
+
+
+  -- We want to keep the current pan position, unless it would go beyond the pan boundaries.
+  -- TODO: Make zoom-panning towards cursor position optional.
+  local currentX = self:GetCurrentScrollX()
+  local currentY = self:GetCurrentScrollY()
+  -- We only need to check for pan boundaries if we are zooming out.
+  if delta < 0 then
+    -- Calculate scroll extents for the new scale
+    -- to prevent zoom out from going beyond the border.
+    local xMin, xMax, yMin, yMax = self:CalculateScrollExtentsAtScale(targetScale)
+    currentX = Clamp(currentX, xMin, xMax)
+    currentY = Clamp(currentY, yMin, yMax)
+  end
+  -- Prevent the undesired panning of MAP_CANVAS_MOUSE_WHEEL_ZOOM_BEHAVIOR_SMOOTH.
+  self:SetPanTarget(currentX, currentY)
+end)
+
+
