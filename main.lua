@@ -142,6 +142,11 @@ local GameTooltip_AddNormalLine = _G.GameTooltip_AddNormalLine
 local GameTooltip_AddErrorLine  = _G.GameTooltip_AddErrorLine
 local GetScaledCursorPosition   = _G.GetScaledCursorPosition
 
+local math_floor = _G.math.floor
+local function Round(num, numDecimalPlaces)
+  local mult = 10^(numDecimalPlaces or 0)
+  return math_floor(num * mult + 0.5) / mult
+end
 
 
 -- TODO: Make optional.
@@ -994,47 +999,47 @@ WorldMapFrame.ScrollContainer:HookScript("OnUpdate", function(self)
     local playerPos = C_Map_GetPlayerMapPosition(self:GetParent():GetMapID(), "player")
     if not playerPos then return end
 
-    local playerPosX, playerPosY = playerPos:GetXY()
-    playerPosX = Clamp(playerPosX, self.scrollXExtentsMin, self.scrollXExtentsMax)
-    playerPosY = Clamp(playerPosY, self.scrollYExtentsMin, self.scrollYExtentsMax)
+    local newScrollX, newScrollY = playerPos:GetXY()
+    newScrollX = Round(Clamp(newScrollX, self.scrollXExtentsMin, self.scrollXExtentsMax), 3)
+    newScrollY = Round(Clamp(newScrollY, self.scrollYExtentsMin, self.scrollYExtentsMax), 3)
 
-    local currentScale = self:GetCanvasScale()
-
-    -- Do this while zooming to keep borders of map and frame aligned.
-    if self.targetScale < currentScale or currentScale < self.targetScale then
+    -- Do instant pan while zooming to keep borders of map and frame aligned.
+    if self:GetCanvasScale() ~= self.targetScale then
       -- currentScrollX and targetScrollX are not set by SetNormalizedHorizontalScroll()
       -- so we have to set them manually to prevent the map jumping back after auto-centering was disabled.
-      if self.currentScrollX ~= playerPosX then
-        self.currentScrollX = playerPosX
-        self.targetScrollX = playerPosX
-        self:SetNormalizedHorizontalScroll(playerPosX)
+      if self.currentScrollX ~= newScrollX then
+        self.currentScrollX = newScrollX
+        self.targetScrollX = newScrollX
+        self:SetNormalizedHorizontalScroll(newScrollX)
       end
-      if self.currentScrollY ~= playerPosY then
-        self.currentScrollY = playerPosY
-        self.targetScrollY = playerPosY
-        self:SetNormalizedVerticalScroll(playerPosY)
+      if self.currentScrollY ~= newScrollY then
+        self.currentScrollY = newScrollY
+        self.targetScrollY = newScrollY
+        self:SetNormalizedVerticalScroll(newScrollY)
       end
-    -- Do this while not zooming to smoothly move to the player's position.
+    -- Do smooth pan while not zooming to smoothly move to the player's position.
     else
-      self:SetPanTarget(playerPosX, playerPosY)
+      if self.currentScrollX ~= newScrollX or self.currentScrollY ~= newScrollY then
+        self:SetPanTarget(newScrollX, newScrollY)
+      end
     end
 
   -- If not auto-centering, we just want to make sure that zooming out does not go beyond the map boundaries.
   else
 
     -- Only needed for zooming out.
-    if self.targetScale < self:GetCanvasScale() then
-      local limitedX = Clamp(self:GetCurrentScrollX(), self.scrollXExtentsMin, self.scrollXExtentsMax)
-      local limitedY = Clamp(self:GetCurrentScrollY(), self.scrollYExtentsMin, self.scrollYExtentsMax)
-      if self.currentScrollX ~= limitedX then
-        self.currentScrollX = limitedX
-        self.targetScrollX = limitedX
-        self:SetNormalizedHorizontalScroll(limitedX)
+    if self:GetCanvasScale() > self.targetScale then
+      local newScrollX = Clamp(self:GetCurrentScrollX(), self.scrollXExtentsMin, self.scrollXExtentsMax)
+      local newScrollY = Clamp(self:GetCurrentScrollY(), self.scrollYExtentsMin, self.scrollYExtentsMax)
+      if self.currentScrollX ~= newScrollX then
+        self.currentScrollX = newScrollX
+        self.targetScrollX = newScrollX
+        self:SetNormalizedHorizontalScroll(newScrollX)
       end
-      if self.currentScrollY ~= limitedY then
-        self.currentScrollY = limitedY
-        self.targetScrollY = limitedY
-        self:SetNormalizedVerticalScroll(limitedY)
+      if self.currentScrollY ~= newScrollY then
+        self.currentScrollY = newScrollY
+        self.targetScrollY = newScrollY
+        self:SetNormalizedVerticalScroll(newScrollY)
       end
     end
 
@@ -1112,3 +1117,23 @@ WorldMapFrame.ScrollContainer:HookScript("OnMouseWheel", function(self, delta)
 end)
 
 
+
+
+-- -- For debugging.
+-- local monitoringFrame = CreateFrame("Frame")
+-- local lastScale = nil
+-- local function MonitoringFrameOnUpdateFunction(self, elapsed)
+  -- local currentScale = WorldMapFrame.ScrollContainer:GetCanvasScale()
+  -- print("----", currentScale)
+  -- if lastScale == currentScale then
+    -- print("++++ Stopping")
+    -- monitoringFrame:SetScript("OnUpdate", nil)
+    -- lastScale = nil
+    -- return
+  -- end
+  -- lastScale = currentScale
+-- end
+-- hooksecurefunc(WorldMapFrame.ScrollContainer , "SetZoomTarget", function(self, targetScale)
+  -- print("SetZoomTarget", WorldMapFrame.ScrollContainer:GetCanvasScale(), "to", targetScale)
+  -- monitoringFrame:SetScript("OnUpdate", MonitoringFrameOnUpdateFunction)
+-- end)
