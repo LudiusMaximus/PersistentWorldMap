@@ -10,4 +10,10 @@
 ## X-License: The MIT License (MIT)
 
 RecenterButtonTemplate.xml
+
+taintPrevent.lua
+buttons.lua
+restoreAndReset.lua
+
+
 main.lua
