@@ -185,10 +185,11 @@ Addon.ResetMap = function(preserveZoom)
   -- print("ResetMap", MapUtil_GetDisplayableMapForPlayer())
   WorldMapFrame:SetMapID(MapUtil_GetDisplayableMapForPlayer())
 
-  previousScale = Clamp(previousScale, WorldMapFrame.ScrollContainer:GetScaleForMinZoom(), WorldMapFrame.ScrollContainer:GetScaleForMaxZoom())
-
-  if preserveZoom then
-    print("restoring", previousScale)
+  if preserveZoom and previousScale then
+    
+    -- print("restoring", previousScale)
+  
+    previousScale = Clamp(previousScale, WorldMapFrame.ScrollContainer:GetScaleForMinZoom(), WorldMapFrame.ScrollContainer:GetScaleForMaxZoom())
     WorldMapFrame.ScrollContainer.currentScale = previousScale
     WorldMapFrame.ScrollContainer.targetScale = previousScale
     WorldMapFrame:OnMapChanged()
