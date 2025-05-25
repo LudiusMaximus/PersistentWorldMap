@@ -1,7 +1,6 @@
 local folderName, Addon = ...
 
 -- Locals for frequently used global frames and functions.
-
 local GameTooltip_AddBlankLineToTooltip  = _G.GameTooltip_AddBlankLineToTooltip
 local GameTooltip_AddErrorLine           = _G.GameTooltip_AddErrorLine
 local GameTooltip_AddInstructionLine     = _G.GameTooltip_AddInstructionLine
@@ -9,16 +8,9 @@ local GameTooltip_AddNormalLine          = _G.GameTooltip_AddNormalLine
 local GameTooltip_SetTitle               = _G.GameTooltip_SetTitle
 local PlaySound                          = _G.PlaySound
 
-
--- ###############################
--- ### Setting up the buttons. ###
--- ###############################
-
-
-
+-- Setting up the buttons.
 local recenterButton = nil
 local autoCenterLockButton = nil
-
 
 local function RecenterButtonEnterFunction(button)
   GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
@@ -33,11 +25,10 @@ local function RecenterButtonEnterFunction(button)
   GameTooltip:Show()
 end
 
-
 -- Needs to be called by CheckMap().
 Addon.RecenterButtonSetEnabled = function(enable)
   if not recenterButton then return end
-  
+
   if enable then
     if recenterButton:IsEnabled() then return end
     recenterButton.centerDot.t:SetVertexColor(0, 0, 0, 1)
@@ -45,17 +36,12 @@ Addon.RecenterButtonSetEnabled = function(enable)
     if not recenterButton:IsEnabled() then return end
     recenterButton.centerDot.t:SetVertexColor(1, 0.9, 0, 1)
   end
-  
+
   recenterButton:SetEnabled(enable)
   if GameTooltip:GetOwner() == recenterButton then
     RecenterButtonEnterFunction(recenterButton)
   end
 end
-
-
-
-
-
 
 local function AutoCenterLockButtonEnterFunction(button)
   GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
@@ -73,7 +59,6 @@ local function AutoCenterLockButtonEnterFunction(button)
   end
   GameTooltip:Show()
 end
-
 
 -- Needs to be called by EnableCenterOnPlayer() and DisableCenterOnPlayer().
 Addon.UpdateAutoCenterLockButton = function()
@@ -100,27 +85,29 @@ Addon.AutoCenterLockButtonSetEnabled = function(enable)
   end
 end
 
+-- Recenter button mixin
+local RecenterButtonMixin = {}
+_G["PersistentWorldMapRecenterButtonMixin"] = RecenterButtonMixin
 
--- Call on starup.
-local function CreateMapButtons(anchorButton)
+function RecenterButtonMixin:OnClick()
+  PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+  Addon.ResetMap()
+  Addon.RecenterButtonSetEnabled(false)
+end
 
+function RecenterButtonMixin:OnEnter()
+  RecenterButtonEnterFunction(self)
+end
+
+function RecenterButtonMixin:Refresh()
+  -- Function expected to exist by Krowi_WorldMapButtons
+end
+
+-- Call on startup.
+local function CreateMapButtons()
   -- Template in RecenterButtonTemplate.xml copied from WorldMapTrackingPinButtonTemplate
   -- in Blizzard's \Interface\AddOns\Blizzard_WorldMap\Blizzard_WorldMapTemplates.xml
-  recenterButton = CreateFrame("Button", nil, WorldMapFrame.ScrollContainer, "RecenterButtonTemplate")
-  recenterButton:SetPoint("TOPRIGHT", anchorButton, "BOTTOMRIGHT", 0, 0)
-
-  recenterButton:SetScript("OnClick", function()
-      PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-      Addon.ResetMap()
-      Addon.RecenterButtonSetEnabled(false)
-    end)
-
-  recenterButton:SetScript("OnEnter", function(self)
-      RecenterButtonEnterFunction(self)
-    end)
-  recenterButton:SetScript("OnLeave", function()
-      GameTooltip:Hide()
-    end)
+  recenterButton = LibStub("Krowi_WorldMapButtons-1.4"):Add("RecenterButtonTemplate", "BUTTON")
 
   recenterButton.Icon:SetAtlas("TargetCrosshairs")
   recenterButton.Icon:SetTexCoord(0.1, 0.5, 0.1, 0.5)
@@ -134,12 +121,9 @@ local function CreateMapButtons(anchorButton)
 
   Addon.RecenterButtonSetEnabled(false)
 
-
-
-
   -- Add the "lock to player position" button.
   autoCenterLockButton = CreateFrame("Button", nil, recenterButton)
-  
+
   autoCenterLockButton:SetSize(18, 21)
   autoCenterLockButton:SetPoint("CENTER", recenterButton, "BOTTOMRIGHT", -4, 7)
 
@@ -197,25 +181,9 @@ local function CreateMapButtons(anchorButton)
 
 end
 
-
-
 local startupFrame = CreateFrame("Frame")
 startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 startupFrame:SetScript("OnEvent", function(_, _, isLogin, isReload)
-
   if not isLogin and not isReload then return end
-
-  -- Put the recenter button below the map pin button.
-  local mapPinButton
-  for i, child in pairs({WorldMapFrame:GetChildren()}) do
-    -- print(i, child, child.Icon, child.Icon and child.Icon:GetAtlas() or "")
-    if child.Icon and child.Icon:GetAtlas() == "Waypoint-MapPin-Untracked" then
-      -- print("Found legend button:" , child:GetObjectType(), child:GetDebugName(), child.Icon:GetAtlas())
-      mapPinButton = child
-    end
-  end
-  if mapPinButton then
-    CreateMapButtons(mapPinButton)
-  end
-
+  CreateMapButtons(mapPinButton)
 end)

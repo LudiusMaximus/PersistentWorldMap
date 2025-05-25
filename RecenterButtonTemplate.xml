@@ -1,11 +1,8 @@
-<Ui xmlns="http://www.blizzard.com/wow/ui/"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xsi:schemaLocation="http://www.blizzard.com/wow/ui/
-                        ..\FrameXML\UI.xsd">
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
 
-  <!-- Copied from WorldMapTrackingPinButtonTemplate (without scripts) -->
+  <!-- Copied from WorldMapTrackingPinButtonTemplate -->
   <!-- in Blizzard's \Interface\AddOns\Blizzard_WorldMap\Blizzard_WorldMapTemplates.xml -->
-  <Button name="RecenterButtonTemplate" frameStrata="HIGH" motionScriptsWhileDisabled="true" virtual="true">
+  <Button name="RecenterButtonTemplate" frameStrata="HIGH" motionScriptsWhileDisabled="true" enableMouse="true" virtual="true" mixin="PersistentWorldMapRecenterButtonMixin">
     <Size x="32" y="32"/>
 		<Layers>
 			<Layer level="BACKGROUND" textureSubLevel="-1">
@@ -54,11 +51,15 @@
 					<Size x="37" y="37"/>
 					<Anchors>
 						<Anchor point="TOPLEFT" relativeKey="$parent.Border" x="-2" y="1"/>
-					</Anchors>					
+					</Anchors>
 				</Texture>
-			</Layer>			
+			</Layer>
 		</Layers>
 		<HighlightTexture alphaMode="ADD" file="Interface\Minimap\UI-Minimap-ZoomButton-Highlight"/>
+		<Scripts>
+			<OnClick method="OnClick"/>
+			<OnEnter method="OnEnter"/>
+			<OnLeave function="GameTooltip_Hide"/>
+		</Scripts>
   </Button>
-  
 </Ui>
