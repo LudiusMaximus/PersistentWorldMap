@@ -288,7 +288,7 @@ WorldMapFrame:HookScript("OnHide", StopMapUpdates)
 
 local startupFrame = CreateFrame("Frame")
 startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-startupFrame:SetScript("OnEvent", function(_, _, isLogin, isReload)
+startupFrame:SetScript("OnEvent", function()
   -- After each loading screen, reset the map memory.
   lastMapID = nil
 end)

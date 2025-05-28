@@ -200,10 +200,8 @@ end
 
 
 local startupFrame = CreateFrame("Frame")
-startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-startupFrame:SetScript("OnEvent", function(_, _, isLogin, isReload)
-
-  if not isLogin and not isReload then return end
+startupFrame:RegisterEvent("PLAYER_LOGIN")
+startupFrame:SetScript("OnEvent", function()
 
   -- Put the recenter button below the map pin button.
   local mapPinButton
