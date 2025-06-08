@@ -21,7 +21,7 @@ local reloadAfterCombat = false
 function SuperTrackablePinMixin:OnAcquired(...)
   if not self:IsSuperTrackingExternallyHandled() then
 
-    -- Ludius change to prevnt taint:
+    -- Ludius change to prevent taint:
     if not InCombatLockdown() then
       self:UpdateMousePropagation();
     else
@@ -101,7 +101,7 @@ do
 
     pin:OnAcquired(...);
 
-    -- Ludius change to prevnt taint:
+    -- Ludius change to prevent taint:
     if not InCombatLockdown() then
       pin:CheckMouseButtonPassthrough("RightButton");
     else
@@ -117,8 +117,11 @@ end
 
 -- No idea if we need this. But better be on the safe side.
 local leaveCombatFrame = CreateFrame("Frame")
-leaveCombatFrame:RegisterEvent("PLAYER_LEAVE_COMBAT")
+leaveCombatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 leaveCombatFrame:SetScript("OnEvent", function()
+  -- I still got the taint once, so I rather double-check!
+  if InCombatLockdown() then return end
+
   if reloadAfterCombat and WorldMapFrame:IsShown() then
     WorldMapFrame:OnMapChanged()
     Addon.PlayerPingAnimation(false)
@@ -317,10 +320,8 @@ end
 
 
 local startupFrame = CreateFrame("Frame")
-startupFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-startupFrame:SetScript("OnEvent", function(_, _, isLogin, isReload)
-
-  if not isLogin and not isReload then return end
+startupFrame:RegisterEvent("PLAYER_LOGIN")
+startupFrame:SetScript("OnEvent", function()
 
   -- Needed for the boss pins to work in combat lockdown.
   if not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
