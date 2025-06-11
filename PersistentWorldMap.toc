@@ -9,6 +9,7 @@
 ## X-Donate: PayPal:ludiusmaximus@gmail.com
 ## X-License: The MIT License (MIT)
 
+embeds.xml
 RecenterButtonTemplate.xml
 
 taintPrevent.lua
