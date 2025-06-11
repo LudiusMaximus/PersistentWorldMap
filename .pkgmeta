@@ -1,0 +1,7 @@
+package-as: PersistentWorldMap
+
+externals:
+    Libs/Krowi_WorldMapButtons:
+        url: https://github.com/TheKrowi/Krowi_WorldMapButtons
+    Libs/LibStub:
+        url: https://repos.wowace.com/wow/libstub/trunk

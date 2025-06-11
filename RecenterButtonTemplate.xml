@@ -1,9 +1,10 @@
-<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
+<Ui xmlns="http://www.blizzard.com/wow/ui/"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.blizzard.com/wow/ui/ ..\FrameXML\UI.xsd">
 
-  <!-- Copied from WorldMapTrackingPinButtonTemplate -->
-  <!-- in Blizzard's \Interface\AddOns\Blizzard_WorldMap\Blizzard_WorldMapTemplates.xml -->
-  <Button name="RecenterButtonTemplate" frameStrata="HIGH" motionScriptsWhileDisabled="true" enableMouse="true" virtual="true" mixin="PersistentWorldMapRecenterButtonMixin">
-    <Size x="32" y="32"/>
+	<!-- Copied from WorldMapTrackingPinButtonTemplate in Blizzard's \Interface\AddOns\Blizzard_WorldMap\Blizzard_WorldMapTemplates.xml -->
+	<Button name="RecenterButtonTemplate" frameStrata="HIGH" motionScriptsWhileDisabled="true" virtual="true" mixin="PersistentWorldMapRecenterButtonMixin">
+		<Size x="32" y="32"/>
 		<Layers>
 			<Layer level="BACKGROUND" textureSubLevel="-1">
 				<Texture atlas="MapCornerShadow-Right" useAtlasSize="true" hidden="true">
@@ -56,10 +57,13 @@
 			</Layer>
 		</Layers>
 		<HighlightTexture alphaMode="ADD" file="Interface\Minimap\UI-Minimap-ZoomButton-Highlight"/>
+
+		<!-- Got to put these script references here for the methods to work with Krowi_WorldMapButtons. -->
 		<Scripts>
 			<OnClick method="OnClick"/>
 			<OnEnter method="OnEnter"/>
-			<OnLeave function="GameTooltip_Hide"/>
+			<OnLeave method="OnLeave"/>
 		</Scripts>
-  </Button>
+
+	</Button>
 </Ui>

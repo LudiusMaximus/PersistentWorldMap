@@ -8,9 +8,16 @@ local GameTooltip_AddNormalLine          = _G.GameTooltip_AddNormalLine
 local GameTooltip_SetTitle               = _G.GameTooltip_SetTitle
 local PlaySound                          = _G.PlaySound
 
--- Setting up the buttons.
+
+-- ###############################
+-- ### Setting up the buttons. ###
+-- ###############################
+
+
+
 local recenterButton = nil
 local autoCenterLockButton = nil
+
 
 local function RecenterButtonEnterFunction(button)
   GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
@@ -24,6 +31,7 @@ local function RecenterButtonEnterFunction(button)
   end
   GameTooltip:Show()
 end
+
 
 -- Needs to be called by CheckMap().
 Addon.RecenterButtonSetEnabled = function(enable)
@@ -43,6 +51,9 @@ Addon.RecenterButtonSetEnabled = function(enable)
   end
 end
 
+
+
+
 local function AutoCenterLockButtonEnterFunction(button)
   GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
   GameTooltip_SetTitle(GameTooltip, "Lock map to player")
@@ -59,6 +70,7 @@ local function AutoCenterLockButtonEnterFunction(button)
   end
   GameTooltip:Show()
 end
+
 
 -- Needs to be called by EnableCenterOnPlayer() and DisableCenterOnPlayer().
 Addon.UpdateAutoCenterLockButton = function()
@@ -85,26 +97,38 @@ Addon.AutoCenterLockButtonSetEnabled = function(enable)
   end
 end
 
--- Recenter button mixin
-local RecenterButtonMixin = {}
-_G["PersistentWorldMapRecenterButtonMixin"] = RecenterButtonMixin
 
-function RecenterButtonMixin:OnClick()
+
+
+-- Got to create a global button mixin to refer in my RecenterButtonTemplate, so it works with Krowi_WorldMapButtons.
+PersistentWorldMapRecenterButtonMixin = {}
+
+function PersistentWorldMapRecenterButtonMixin:OnClick()
   PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
   Addon.ResetMap()
   Addon.RecenterButtonSetEnabled(false)
 end
 
-function RecenterButtonMixin:OnEnter()
+function PersistentWorldMapRecenterButtonMixin:OnEnter()
   RecenterButtonEnterFunction(self)
 end
 
-function RecenterButtonMixin:Refresh()
-  -- Function expected to exist by Krowi_WorldMapButtons
+function PersistentWorldMapRecenterButtonMixin:OnLeave()
+  GameTooltip:Hide()
 end
+
+-- Function expected to exist by Krowi_WorldMapButtons.
+function PersistentWorldMapRecenterButtonMixin:Refresh() end
+
+
 
 -- Call on startup.
 local function CreateMapButtons()
+
+  -- #####################################################
+  -- ### Persistent World Mape ("Recenter Map") button ###
+  -- #####################################################
+  
   -- Template in RecenterButtonTemplate.xml copied from WorldMapTrackingPinButtonTemplate
   -- in Blizzard's \Interface\AddOns\Blizzard_WorldMap\Blizzard_WorldMapTemplates.xml
   recenterButton = LibStub("Krowi_WorldMapButtons-1.4"):Add("RecenterButtonTemplate", "BUTTON")
@@ -121,7 +145,13 @@ local function CreateMapButtons()
 
   Addon.RecenterButtonSetEnabled(false)
 
-  -- Add the "lock to player position" button.
+
+
+
+  -- ###################################
+  -- ### "Lock map to player" button ###
+  -- ###################################
+
   autoCenterLockButton = CreateFrame("Button", nil, recenterButton)
 
   autoCenterLockButton:SetSize(18, 21)
@@ -173,16 +203,17 @@ local function CreateMapButtons()
 
   -- For tooltips.
   autoCenterLockButton:SetScript("OnEnter", function(self)
-      AutoCenterLockButtonEnterFunction(self)
-    end)
+    AutoCenterLockButtonEnterFunction(self)
+  end)
   autoCenterLockButton:SetScript("OnLeave", function()
-      GameTooltip:Hide()
-    end)
+    GameTooltip:Hide()
+  end)
 
 end
+
 
 local startupFrame = CreateFrame("Frame")
 startupFrame:RegisterEvent("PLAYER_LOGIN")
 startupFrame:SetScript("OnEvent", function()
-  CreateMapButtons(mapPinButton)
+  CreateMapButtons()
 end)
