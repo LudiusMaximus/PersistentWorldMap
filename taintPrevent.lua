@@ -2,7 +2,7 @@ local folderName, Addon = ...
 
 -- Locals for frequently used global frames and functions.
 local InCombatLockdown              = _G.InCombatLockdown
-local C_Map_GetMapInfo                   = _G.C_Map.GetMapInfo
+local C_Map_GetMapInfo              = _G.C_Map.GetMapInfo
 local QuestLogPopupDetailFrame      = _G.QuestLogPopupDetailFrame
 local WorldMapFrame                 = _G.WorldMapFrame
 
