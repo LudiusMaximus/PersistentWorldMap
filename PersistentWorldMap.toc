@@ -1,6 +1,7 @@
-## Interface: 110107
+## Interface: 110200
 ## Version: @project-version@
 ## Title: Persistent World Map
+## IconTexture: interface/icons/inv_misc_map08.blp
 ## Author: LudiusMaximus
 ## Notes: Maintains the World Map's current zoom and pan when closing and reopening it.
 ## X-Curse-Project-ID: 360039
