@@ -374,12 +374,14 @@ end)
 
 
 local updateMapFrame = CreateFrame("Frame")
--- Need this to remove tomb stone pin.
+-- Needed to remove tomb stone pin.
 updateMapFrame:RegisterEvent("PLAYER_UNGHOST")
--- Sometime accepting (world) quests does not remove the exlamation mark.
+-- Sometimes accepting (world) quests does not remove the exlamation mark.
 updateMapFrame:RegisterEvent("QUEST_ACCEPTED")
 -- Just to be on the save side.
 updateMapFrame:RegisterEvent("QUEST_REMOVED")
+-- Needed to change flightpoint icon colour after learning a new flightpoint. 
+updateMapFrame:RegisterEvent("TAXI_NODE_STATUS_CHANGED")
 updateMapFrame:SetScript("OnEvent", function()
   -- Sometimes does not work right away.
   C_Timer.NewTimer(0.2, function()
