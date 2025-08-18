@@ -382,6 +382,8 @@ updateMapFrame:RegisterEvent("QUEST_ACCEPTED")
 updateMapFrame:RegisterEvent("QUEST_REMOVED")
 -- Needed to change flightpoint icon colour after learning a new flightpoint. 
 updateMapFrame:RegisterEvent("TAXI_NODE_STATUS_CHANGED")
+-- Update map after killing dungeon/raid boss.
+updateMapFrame:RegisterEvent("TREASURE_PICKER_CACHE_FLUSH")
 updateMapFrame:SetScript("OnEvent", function()
   -- Sometimes does not work right away.
   C_Timer.NewTimer(0.2, function()
