@@ -18,6 +18,7 @@ local PlaySound                          = _G.PlaySound
 local recenterButton = nil
 local autoCenterLockButton = nil
 
+local showingCurrentMap = true
 
 local function RecenterButtonEnterFunction(button)
   GameTooltip:SetOwner(button, "ANCHOR_RIGHT")
@@ -25,9 +26,11 @@ local function RecenterButtonEnterFunction(button)
   GameTooltip_AddNormalLine(GameTooltip, "Restores the map to its previous state when closing and reopenning it.")
   GameTooltip_AddNormalLine(GameTooltip, "Automatically switches to the map of a newly entered zone.")
   GameTooltip_AddBlankLineToTooltip(GameTooltip)
-  GameTooltip_AddInstructionLine(GameTooltip, "Click here to show the map of the current zone or just shift-click on the map.")
-  if not button:IsEnabled() then
-    GameTooltip_AddErrorLine(GameTooltip, "Already showing the map of the current zone.")
+  GameTooltip_AddInstructionLine(GameTooltip, "Right-click for options.")
+  GameTooltip_AddBlankLineToTooltip(GameTooltip)
+  GameTooltip_AddInstructionLine(GameTooltip, "Left-click to show the map of the current zone or just shift-click on the map.")
+  if showingCurrentMap then
+    GameTooltip_AddErrorLine(GameTooltip, "(Already showing the map of the current zone.)")
   end
   GameTooltip:Show()
 end
@@ -38,19 +41,19 @@ Addon.RecenterButtonSetEnabled = function(enable)
   if not recenterButton then return end
 
   if enable then
-    if recenterButton:IsEnabled() then return end
+    showingCurrentMap = false
     recenterButton.centerDot.t:SetVertexColor(0, 0, 0, 1)
+    recenterButton:GetHighlightTexture():Show()
   else
-    if not recenterButton:IsEnabled() then return end
+    showingCurrentMap = true
     recenterButton.centerDot.t:SetVertexColor(1, 0.9, 0, 1)
+    recenterButton:GetHighlightTexture():Hide()
   end
 
-  recenterButton:SetEnabled(enable)
   if GameTooltip:GetOwner() == recenterButton then
     RecenterButtonEnterFunction(recenterButton)
   end
 end
-
 
 
 
@@ -60,10 +63,10 @@ local function AutoCenterLockButtonEnterFunction(button)
   GameTooltip_AddNormalLine(GameTooltip, "Automatically keep the player pin closest to the center of the map when the map is zoomed in. (Not possible in dungeons, raids, battlegrounds and arenas.)")
   GameTooltip_AddBlankLineToTooltip(GameTooltip)
   if button:IsEnabled() then
-    if Addon.autoCentering then
-      GameTooltip_AddInstructionLine(GameTooltip, "Click here to turn OFF\nor just drag the map.")
+    if PWM_config.autoCentering then
+      GameTooltip_AddInstructionLine(GameTooltip, "Left-click to turn OFF\nor just drag the map.")
     else
-      GameTooltip_AddInstructionLine(GameTooltip, "Click here to turn ON\nor just double-click on the map.")
+      GameTooltip_AddInstructionLine(GameTooltip, "Left-click to turn ON\nor just double-click on the map.")
     end
   else
     GameTooltip_AddErrorLine(GameTooltip, "Not possible in this zone.")
@@ -75,7 +78,15 @@ end
 -- Needs to be called by EnableCenterOnPlayer() and DisableCenterOnPlayer().
 Addon.UpdateAutoCenterLockButton = function()
   if not autoCenterLockButton then return end
-  autoCenterLockButton:GetNormalTexture():SetDesaturated(not Addon.autoCentering)
+
+  if not PWM_config.autoCenterEnabled then
+    autoCenterLockButton:Hide()
+    return
+  else
+    autoCenterLockButton:Show()
+  end
+
+  autoCenterLockButton:GetNormalTexture():SetDesaturated(not PWM_config.autoCentering)
   if GameTooltip:GetOwner() == autoCenterLockButton then
     AutoCenterLockButtonEnterFunction(autoCenterLockButton)
   end
@@ -103,10 +114,16 @@ end
 -- Got to create a global button mixin to refer in my RecenterButtonTemplate, so it works with Krowi_WorldMapButtons.
 PersistentWorldMapRecenterButtonMixin = {}
 
-function PersistentWorldMapRecenterButtonMixin:OnClick()
-  PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-  Addon.ResetMap()
-  Addon.RecenterButtonSetEnabled(false)
+function PersistentWorldMapRecenterButtonMixin:OnClick(button)
+  if button == "LeftButton" and not showingCurrentMap then
+    PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    Addon.ResetMap()
+    Addon.RecenterButtonSetEnabled(false)
+
+  elseif button == "RightButton" then
+    Addon.OpenOptionsMenu()
+
+  end
 end
 
 function PersistentWorldMapRecenterButtonMixin:OnEnter()
@@ -125,13 +142,16 @@ function PersistentWorldMapRecenterButtonMixin:Refresh() end
 -- Call on startup.
 local function CreateMapButtons()
 
-  -- #####################################################
-  -- ### Persistent World Mape ("Recenter Map") button ###
-  -- #####################################################
-  
+  -- ####################################################
+  -- ### Persistent World Map ("Recenter Map") button ###
+  -- ####################################################
+
   -- Template in RecenterButtonTemplate.xml copied from WorldMapTrackingPinButtonTemplate
   -- in Blizzard's \Interface\AddOns\Blizzard_WorldMap\Blizzard_WorldMapTemplates.xml
   recenterButton = LibStub("Krowi_WorldMapButtons-1.4"):Add("RecenterButtonTemplate", "BUTTON")
+
+  -- Register the button to receive both left and right clicks for the dropdown menu.
+  recenterButton:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
   recenterButton.Icon:SetAtlas("TargetCrosshairs")
   recenterButton.Icon:SetTexCoord(0.1, 0.5, 0.1, 0.5)
@@ -143,6 +163,9 @@ local function CreateMapButtons()
   t:SetSize(10, 10)
   recenterButton.centerDot.t = t
 
+  -- The button is always enabled to allow right clicks.
+  recenterButton:SetEnabled(true)
+  -- We only let it appear disabled.
   Addon.RecenterButtonSetEnabled(false)
 
 
@@ -164,7 +187,7 @@ local function CreateMapButtons()
   autoCenterLockButton:SetPushedAtlas("Monuments-Lock")
   autoCenterLockButton:SetHighlightAtlas("bountiful-glow", "BLEND")
 
-  if not Addon.autoCentering then
+  if not PWM_config.autoCentering then
     autoCenterLockButton:GetNormalTexture():SetDesaturated(true)
   end
 
@@ -192,7 +215,7 @@ local function CreateMapButtons()
 
   -- Handle clicks
   autoCenterLockButton:SetScript("OnClick", function()
-    if Addon.autoCentering then
+    if PWM_config.autoCentering then
       PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
       Addon.DisableCenterOnPlayer()
     else
@@ -208,6 +231,8 @@ local function CreateMapButtons()
   autoCenterLockButton:SetScript("OnLeave", function()
     GameTooltip:Hide()
   end)
+
+  Addon.UpdateAutoCenterLockButton()
 
 end
 

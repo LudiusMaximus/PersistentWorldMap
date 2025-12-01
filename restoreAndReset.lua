@@ -25,10 +25,9 @@ local lastScrollY = nil
 -- Flag to prevent saving before map was first shown.
 local firstShownAfterLogin = false
 
--- Only store the last map for RESET_MAP_AFTER seconds.
+-- Only store the last map for PWM_config.resetMapAfter seconds.
 local lastMapCloseTime = GetTime()
--- TODO: Make optional.
-local RESET_MAP_AFTER = 15
+
 
 -- If the last viewed map was the map in which the player was,
 -- we want the map to automatically change to the new map;
@@ -45,7 +44,7 @@ local function CheckMap()
   if WorldMapFrame:GetMapID() ~= currentMap then
     if lastViewedMapWasCurrentMap then
       -- If auto-centering is active, we want to preserve the zoom level.
-      Addon.ResetMap(Addon.autoCentering)
+      Addon.ResetMap(PWM_config.autoCentering)
     else
       Addon.RecenterButtonSetEnabled(true)
     end
@@ -128,8 +127,8 @@ local function RestoreMap()
       firstShownAfterLogin = true
     end
 
-    -- print("Post Hook after showing", GetTime(), lastMapCloseTime, GetTime() - lastMapCloseTime, RESET_MAP_AFTER)
-    if GetTime() - lastMapCloseTime > RESET_MAP_AFTER then
+    -- print("Post Hook after showing", GetTime(), lastMapCloseTime, GetTime() - lastMapCloseTime, PWM_config.resetMapAfter)
+    if GetTime() - lastMapCloseTime > PWM_config.resetMapAfter then
       lastMapID = nil
     else
       RestoreMapState()

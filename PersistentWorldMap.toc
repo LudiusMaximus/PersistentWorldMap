@@ -3,7 +3,8 @@
 ## Title: Persistent World Map
 ## IconTexture: interface/icons/inv_misc_map08.blp
 ## Author: LudiusMaximus
-## Notes: Maintains the World Map's current zoom and pan when closing and reopening it.
+## Notes: Maintains the World Map's current zoom and pan when closing and reopening it. And more...
+## SavedVariables: PWM_config
 ## X-Curse-Project-ID: 360039
 ## X-WoWI-ID: 25499
 ## X-Wago-ID: EGPX1jG1
@@ -17,5 +18,5 @@ taintPrevent.lua
 buttons.lua
 restoreAndReset.lua
 
-
 main.lua
+options.lua

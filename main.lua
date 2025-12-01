@@ -13,19 +13,6 @@ local IsShiftKeyDown            = _G.IsShiftKeyDown
 local GetScaledCursorPosition   = _G.GetScaledCursorPosition
 
 
--- TODO: Make optional.
-local DOUBLE_CLICK_TIME = 0.25
-
-
--- TODO: Make optional.
-local ZOOM_TIME_SECONDS = 0.3
-
-
--- TODO: Store in saved variable
-Addon.autoCentering = false
-
-
-
 -- To prevent player pin pings when we don't need them.
 local playerPin = nil
 Addon.PlayerPingAnimation = function(start)
@@ -86,13 +73,13 @@ local currentTargetY = nil
 -- Using an OnUpdate frame did not work without flickering of quest blobs.
 -- local smoothZoomFrame = CreateFrame("Frame")
 -- local function SmoothZoomOnUpdateFunction(self, elapsed)
-  -- local zoomElapsed = Clamp(GetTime() - zoomStartTime, 0, ZOOM_TIME_SECONDS)
-  -- if zoomElapsed >= ZOOM_TIME_SECONDS then
+  -- local zoomElapsed = Clamp(GetTime() - zoomStartTime, 0, PWM_config.zoomTimeSeconds)
+  -- if zoomElapsed >= PWM_config.zoomTimeSeconds then
     -- WorldMapFrame.ScrollContainer:InstantPanAndZoom(currentTargetScale, currentTargetX, currentTargetY, true)
     -- smoothZoomFrame:SetScript("OnUpdate", nil)
     -- return
   -- end
-  -- local zoomElapsedNormalized = zoomElapsed / ZOOM_TIME_SECONDS
+  -- local zoomElapsedNormalized = zoomElapsed / PWM_config.zoomTimeSeconds
   -- WorldMapFrame.ScrollContainer:InstantPanAndZoom(currentStartScale + zoomElapsedNormalized * (currentTargetScale - currentStartScale), currentTargetX, currentTargetY, true)
 -- end
 
@@ -118,10 +105,10 @@ end
 
 local function ZoomTickerFunction(self)
 
-  local zoomElapsed = Clamp(GetTime() - zoomStartTime, 0, ZOOM_TIME_SECONDS)
+  local zoomElapsed = Clamp(GetTime() - zoomStartTime, 0, PWM_config.zoomTimeSeconds)
 
   -- When we are done, make sure we have the final position.
-  if zoomElapsed >= ZOOM_TIME_SECONDS or (
+  if zoomElapsed >= PWM_config.zoomTimeSeconds or (
       WorldMapFrame.ScrollContainer:GetCanvasScale() == currentTargetScale and
       WorldMapFrame.ScrollContainer:GetCurrentScrollX() == currentTargetX and
       WorldMapFrame.ScrollContainer:GetCurrentScrollY() == currentTargetY ) then
@@ -133,7 +120,7 @@ local function ZoomTickerFunction(self)
 
   -- Otherwise, set the intermediate zoom and pan.
   else
-    local zoomElapsedNormalized = EaseOutQuart(zoomElapsed / ZOOM_TIME_SECONDS)
+    local zoomElapsedNormalized = EaseOutQuart(zoomElapsed / PWM_config.zoomTimeSeconds)
     local nextScale = currentStartScale + zoomElapsedNormalized * (currentTargetScale - currentStartScale)
     local xMin, xMax, yMin, yMax = WorldMapFrame.ScrollContainer:CalculateScrollExtentsAtScale(nextScale)
     local nextX = Clamp(currentStartX + zoomElapsedNormalized * (currentTargetX - currentStartX), xMin, xMax)
@@ -146,7 +133,7 @@ end
 
 local function ZoomAndPan(currentScale, targetScale, currentX, targetX, currentY, targetY)
 
-  if ZOOM_TIME_SECONDS == 0 then
+  if PWM_config.zoomTimeSeconds == 0 then
     WorldMapFrame.ScrollContainer:InstantPanAndZoom(targetScale, targetX, targetY, true)
 
   else
@@ -218,9 +205,9 @@ local function AutoCenterStartTimerFunction()
 end
 
 Addon.EnableCenterOnPlayer = function()
-  if Addon.autoCentering then return end
+  if PWM_config.autoCentering then return end
 
-  Addon.autoCentering = true
+  PWM_config.autoCentering = true
   Addon.UpdateAutoCenterLockButton()
 
   -- Do a smooth pan before activating auto-centering.
@@ -241,7 +228,7 @@ Addon.EnableCenterOnPlayer = function()
       ZoomAndPan(currentScale, currentScale, currentX, targetX, currentY, targetY)
     end
 
-    autoCenterStartTimer = C_Timer.NewTimer(ZOOM_TIME_SECONDS, AutoCenterStartTimerFunction)
+    autoCenterStartTimer = C_Timer.NewTimer(PWM_config.zoomTimeSeconds, AutoCenterStartTimerFunction)
   end
 
 end
@@ -253,7 +240,7 @@ Addon.DisableCenterOnPlayer = function()
   end
   ZoomAndPanStop()
 
-  Addon.autoCentering = false
+  PWM_config.autoCentering = false
   Addon.UpdateAutoCenterLockButton()
 end
 
@@ -303,11 +290,13 @@ WorldMapFrame.ScrollContainer:HookScript("OnMouseUp", function(self, button)
     isMouseDown = false
 
     -- Check for double click
-    local currentTime = GetTime()
-    if currentTime - lastClickTime < DOUBLE_CLICK_TIME then
-      Addon.EnableCenterOnPlayer()
+    if PWM_config.autoCenterEnabled then
+      local currentTime = GetTime()
+      if currentTime - lastClickTime < PWM_config.doubleClickTime then
+        Addon.EnableCenterOnPlayer()
+      end
+      lastClickTime = currentTime
     end
-    lastClickTime = currentTime
 
     if resetMap then
       if IsShiftKeyDown() then
@@ -334,7 +323,7 @@ WorldMapFrame.ScrollContainer:HookScript("OnUpdate", function(self)
 
 
   -- Auto-centering.
-  if Addon.autoCentering and not autoCenterStartTimer then
+  if PWM_config.autoCentering and not autoCenterStartTimer then
 
     -- Ensure that targetScale exists. Not checking this sometimes caused an error
     -- when changing into a zone with loading screen (e.g. Ringing Deeps to Dornogal).
@@ -384,6 +373,8 @@ updateMapFrame:RegisterEvent("QUEST_REMOVED")
 updateMapFrame:RegisterEvent("TAXI_NODE_STATUS_CHANGED")
 -- Update map after killing dungeon/raid boss.
 updateMapFrame:RegisterEvent("TREASURE_PICKER_CACHE_FLUSH")
+-- To refresh map after trader's tenders chest reward collected.
+updateMapFrame:RegisterEvent("CHEST_REWARDS_UPDATED_FROM_SERVER")
 updateMapFrame:SetScript("OnEvent", function()
   -- Sometimes does not work right away.
   C_Timer.NewTimer(0.2, function()
@@ -392,8 +383,6 @@ updateMapFrame:SetScript("OnEvent", function()
     Addon.PlayerPingAnimation(false)
   end)
 end)
-
-
 
 
 
