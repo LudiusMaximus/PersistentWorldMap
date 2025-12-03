@@ -1,4 +1,4 @@
-## Interface: 110205
+## Interface: 110207
 ## Version: @project-version@
 ## Title: Persistent World Map
 ## IconTexture: interface/icons/inv_misc_map08.blp
