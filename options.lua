@@ -1,9 +1,6 @@
 local folderName, Addon = ...
 
 
-
-
-
 local CONFIG_DEFAULTS = {
   resetMapAfter     = 15,
   autoCentering     = false,
@@ -39,13 +36,6 @@ end)
 
 
 
-
-
-
-
-
-
-
 -- Create a custom tooltip frame that we control
 local customTooltip = CreateFrame("GameTooltip", "PWM_CustomTooltip", UIParent, "GameTooltipTemplate")
 customTooltip:SetFrameStrata("TOOLTIP")
@@ -59,7 +49,7 @@ local function ShowCustomTooltip(anchorFrame, title, text)
     customTooltipHideTimer:Cancel()
     customTooltipHideTimer = nil
   end
-  
+
   customTooltip:SetOwner(anchorFrame, "ANCHOR_RIGHT")
   customTooltip:ClearLines()
   GameTooltip_SetTitle(customTooltip, title)
@@ -68,19 +58,20 @@ local function ShowCustomTooltip(anchorFrame, title, text)
   customTooltipActive = true
 end
 
+-- Hide tooltip after a delay, so it closes simultaneously with the submenu.
 local function HideCustomTooltipDelayed(delay)
   if customTooltipHideTimer then
     customTooltipHideTimer:Cancel()
   end
-  customTooltipActive = false
-  customTooltipHideTimer = C_Timer.After(delay or 0.33, function()
+  customTooltipHideTimer = C_Timer.NewTimer(delay or 0.33, function()
     customTooltip:Hide()
+    customTooltipActive = false
     customTooltipHideTimer = nil
   end)
 end
 
+-- Hide tooltip immediately if another submenu opens
 local function HideCustomTooltipImmediately()
-  -- Hide tooltip immediately if another submenu opens
   if customTooltipHideTimer then
     customTooltipHideTimer:Cancel()
     customTooltipHideTimer = nil
@@ -89,86 +80,90 @@ local function HideCustomTooltipImmediately()
   customTooltip:Hide()
 end
 
--- Hook into the Menu system to detect when submenus open so we can hide our tooltip immediately
--- (Handled in each submenu's OnEnter handler above)
-
-
+-- Function to call in the OnEnter handler of each submenu button.
+local function OnEnterSubmenuFunction(frame, desc, title, tooltipText)
+  HideCustomTooltipImmediately()
+  desc:ForceOpenSubmenu()
+  ShowCustomTooltip(frame, title, tooltipText)
+end
 
 
 
 Addon.OpenOptionsMenu = function()
-  
-    MenuUtil.CreateContextMenu(UIParent, function(button, mainMenu)
-      mainMenu:CreateTitle("Persistent World Map")
-      mainMenu:CreateDivider()
+
+  MenuUtil.CreateContextMenu(UIParent, function(button, mainMenu)
+    mainMenu:CreateTitle("Persistent World Map")
+    mainMenu:CreateDivider()
+
+
+    local submenu = mainMenu:CreateButton("Reset closed map")
+    submenu:SetOnEnter(function(frame, desc)
+      OnEnterSubmenuFunction(frame, desc, "Reset closed map", "How long the map should remember its zoom and position after closing. Set to 'Never' to always restore the last used map state.")
+    end)
+    submenu:SetOnLeave(function(frame)
+      HideCustomTooltipDelayed(0.33)
+    end)
+
+    submenu:CreateTitle("Reset closed map")
+    submenu:CreateRadio("Instantly",        function() return PWM_config.resetMapAfter ==     0 end, function() PWM_config.resetMapAfter =     0; return MenuResponse.Refresh end)
+    submenu:CreateRadio("After 5 seconds",  function() return PWM_config.resetMapAfter ==     5 end, function() PWM_config.resetMapAfter =     5; return MenuResponse.Refresh end)
+    submenu:CreateRadio("After 15 seconds", function() return PWM_config.resetMapAfter ==    15 end, function() PWM_config.resetMapAfter =    15; return MenuResponse.Refresh end)
+    submenu:CreateRadio("After 30 seconds", function() return PWM_config.resetMapAfter ==    30 end, function() PWM_config.resetMapAfter =    30; return MenuResponse.Refresh end)
+    submenu:CreateRadio("After 60 seconds", function() return PWM_config.resetMapAfter ==    60 end, function() PWM_config.resetMapAfter =    60; return MenuResponse.Refresh end)
+    submenu:CreateRadio("Never",            function() return PWM_config.resetMapAfter == 86400 end, function() PWM_config.resetMapAfter = 86400; return MenuResponse.Refresh end)
 
 
 
-      local submenu = mainMenu:CreateButton("Reset closed map")
-      submenu:SetOnEnter(function(_, desc) 
-        HideCustomTooltipImmediately()
-        desc:ForceOpenSubmenu() 
-      end) -- Open instantly on hover (no delay, like tooltips).
+    submenu = mainMenu:CreateButton("Auto-Center")
+    submenu:SetOnEnter(function(frame, desc)
+      OnEnterSubmenuFunction(frame, desc, "Auto-Center", "When enabled, the map automatically keeps your character centered while zoomed in. Activate by double-clicking the map or clicking the lock button.")
+    end)
+    submenu:SetOnLeave(function(frame)
+      HideCustomTooltipDelayed(0.33)
+    end)
 
-      submenu:CreateTitle("Reset closed map")
-      submenu:CreateRadio("Instantly",        function() return PWM_config.resetMapAfter ==     0 end, function() PWM_config.resetMapAfter =     0; return MenuResponse.Refresh end)
-      submenu:CreateRadio("After 5 seconds",  function() return PWM_config.resetMapAfter ==     5 end, function() PWM_config.resetMapAfter =     5; return MenuResponse.Refresh end)
-      submenu:CreateRadio("After 15 seconds", function() return PWM_config.resetMapAfter ==    15 end, function() PWM_config.resetMapAfter =    15; return MenuResponse.Refresh end)
-      submenu:CreateRadio("After 30 seconds", function() return PWM_config.resetMapAfter ==    30 end, function() PWM_config.resetMapAfter =    30; return MenuResponse.Refresh end)
-      submenu:CreateRadio("After 60 seconds", function() return PWM_config.resetMapAfter ==    60 end, function() PWM_config.resetMapAfter =    60; return MenuResponse.Refresh end)
-      submenu:CreateRadio("Never",            function() return PWM_config.resetMapAfter == 86400 end, function() PWM_config.resetMapAfter = 86400; return MenuResponse.Refresh end)
-      
-
-
-      submenu = mainMenu:CreateButton("Auto-Center")
-      submenu:SetOnEnter(function(_, desc) 
-        HideCustomTooltipImmediately()
-        desc:ForceOpenSubmenu() 
-      end) -- Open instantly on hover (no delay, like tooltips).
-
-      submenu:CreateTitle("Auto-Center")
-      submenu:CreateCheckbox(
-        "Enabled",
-        function()
-          return PWM_config.autoCenterEnabled
-        end,
-        function()
-          PWM_config.autoCenterEnabled = not PWM_config.autoCenterEnabled
-          Addon.UpdateAutoCenterLockButton()
-        end
-      )
-      
+    submenu:CreateTitle("Auto-Center")
+    submenu:CreateCheckbox(
+      "Enabled",
+      function()
+        return PWM_config.autoCenterEnabled
+      end,
+      function()
+        PWM_config.autoCenterEnabled = not PWM_config.autoCenterEnabled
+        Addon.UpdateAutoCenterLockButton()
+      end
+    )
 
 
-      local subsubmenu = submenu:CreateButton("Double-click sensitivity")
-      subsubmenu:SetEnabled(function() return PWM_config.autoCenterEnabled end) -- Disable (grey out) this submenu when auto-centering is disabled.
-      subsubmenu:SetOnEnter(function(frame, desc)
-        desc:ForceOpenSubmenu() -- Open instantly on hover
-        local tooltipText = PWM_config.autoCenterEnabled and "Adjust sensitivity for double-click auto-center" or "Enable Auto-Center to change double-click sensitivity"
-        ShowCustomTooltip(frame, "Double-click sensitivity", tooltipText)
-      end)
-      subsubmenu:SetOnLeave(function(frame)
-        -- Delay hiding the tooltip so it disappears with the submenu (~0.33s)
-        HideCustomTooltipDelayed(0.33)
-      end)
+    local subsubmenu = submenu:CreateButton("Double-click sensitivity")
+    subsubmenu:SetEnabled(function() return PWM_config.autoCenterEnabled end) -- Disable (grey out) this submenu when auto-centering is disabled.
+    subsubmenu:SetOnEnter(function(frame, desc)
+      local tooltipText = PWM_config.autoCenterEnabled and "Adjust sensitivity for double-click auto-center" or "Enable Auto-Center to change double-click sensitivity"
+      OnEnterSubmenuFunction(frame, desc, "Double-click sensitivity", tooltipText)
+    end)
+    subsubmenu:SetOnLeave(function(frame)
+      HideCustomTooltipDelayed(0.33)
+    end)
 
-      subsubmenu:CreateRadio("Slow",   function() return PWM_config.doubleClickTime == 0.5  end, function() PWM_config.doubleClickTime = 0.5;  return MenuResponse.Refresh end)
-      subsubmenu:CreateRadio("Medium", function() return PWM_config.doubleClickTime == 0.25 end, function() PWM_config.doubleClickTime = 0.25; return MenuResponse.Refresh end)
-      subsubmenu:CreateRadio("Fast",   function() return PWM_config.doubleClickTime == 0.2  end, function() PWM_config.doubleClickTime = 0.2;  return MenuResponse.Refresh end)
-      
+    subsubmenu:CreateRadio("Slow",   function() return PWM_config.doubleClickTime == 0.5  end, function() PWM_config.doubleClickTime = 0.5;  return MenuResponse.Refresh end)
+    subsubmenu:CreateRadio("Medium", function() return PWM_config.doubleClickTime == 0.25 end, function() PWM_config.doubleClickTime = 0.25; return MenuResponse.Refresh end)
+    subsubmenu:CreateRadio("Fast",   function() return PWM_config.doubleClickTime == 0.2  end, function() PWM_config.doubleClickTime = 0.2;  return MenuResponse.Refresh end)
 
 
-      submenu = mainMenu:CreateButton("Smooth zoom")
-      submenu:SetOnEnter(function(_, desc) 
-        HideCustomTooltipImmediately()
-        desc:ForceOpenSubmenu() 
-      end) -- Open instantly on hover (no delay, like tooltips).
 
-      submenu:CreateTitle("Smooth zoom")
-      submenu:CreateRadio("Slow",     function() return PWM_config.zoomTimeSeconds == 0.6  end, function() PWM_config.zoomTimeSeconds = 0.6;  return MenuResponse.Refresh end)
-      submenu:CreateRadio("Medium",   function() return PWM_config.zoomTimeSeconds == 0.3  end, function() PWM_config.zoomTimeSeconds = 0.3;  return MenuResponse.Refresh end)
-      submenu:CreateRadio("Fast",     function() return PWM_config.zoomTimeSeconds == 0.15 end, function() PWM_config.zoomTimeSeconds = 0.15; return MenuResponse.Refresh end)
-      submenu:CreateRadio("Disabled", function() return PWM_config.zoomTimeSeconds == 0    end, function() PWM_config.zoomTimeSeconds = 0;    return MenuResponse.Refresh end)
-      
+    submenu = mainMenu:CreateButton("Smooth zoom")
+    submenu:SetOnEnter(function(frame, desc)
+      OnEnterSubmenuFunction(frame, desc, "Smooth zoom", "Controls the animation speed when zooming in or out with the mouse wheel. Set to 'Disabled' for instant zoom without animation.")
+    end)
+    submenu:SetOnLeave(function(frame)
+      HideCustomTooltipDelayed(0.33)
+    end)
+
+    submenu:CreateTitle("Smooth zoom")
+    submenu:CreateRadio("Slow",     function() return PWM_config.zoomTimeSeconds == 0.6  end, function() PWM_config.zoomTimeSeconds = 0.6;  return MenuResponse.Refresh end)
+    submenu:CreateRadio("Medium",   function() return PWM_config.zoomTimeSeconds == 0.3  end, function() PWM_config.zoomTimeSeconds = 0.3;  return MenuResponse.Refresh end)
+    submenu:CreateRadio("Fast",     function() return PWM_config.zoomTimeSeconds == 0.15 end, function() PWM_config.zoomTimeSeconds = 0.15; return MenuResponse.Refresh end)
+    submenu:CreateRadio("Disabled", function() return PWM_config.zoomTimeSeconds == 0    end, function() PWM_config.zoomTimeSeconds = 0;    return MenuResponse.Refresh end)
+
   end)
 end

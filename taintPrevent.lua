@@ -8,6 +8,30 @@ local WorldMapFrame                 = _G.WorldMapFrame
 
 
 -- ######################################################################################
+-- ### Modify ADDON_ACTION_FORBIDDEN popup to add a "Reload UI" button.               ###
+-- ######################################################################################
+
+-- The default popup has:
+--   button1 = "Disable" (disables addon and reloads)
+--   button2 = "Ignore" (dismisses popup)
+-- We add a third button to reload without disabling.
+local addonForbiddenFrame = CreateFrame("Frame")
+addonForbiddenFrame:RegisterEvent("PLAYER_LOGIN")
+addonForbiddenFrame:SetScript("OnEvent", function()
+  if StaticPopupDialogs and StaticPopupDialogs["ADDON_ACTION_FORBIDDEN"] then
+    local popup = StaticPopupDialogs["ADDON_ACTION_FORBIDDEN"]
+    -- A modified variant of
+    -- ADDON_ACTION_FORBIDDEN = "%s has been blocked from an action only available to the Blizzard UI.\nYou can disable this addon and reload the UI."
+    popup.text = "%s has been blocked from an action only available to the Blizzard UI.\n\nIf this happens rarely, try reloading the UI first. Only if this issue keeps repeating unacceptably, consider disabling the addon."
+    popup.button3 = RELOADUI or "Reload UI"
+    popup.OnAlt = function()
+      C_UI.Reload()
+    end
+  end
+end)
+
+
+-- ######################################################################################
 -- ### Preventing taint, which would otherwise lead to errors during combat lockdown. ###
 -- ######################################################################################
 
@@ -115,6 +139,97 @@ do
 end
 
 
+-- Same fix for FlightMapFrame (taxi map).
+-- FlightMapFrame is load-on-demand, so we need to wait for it.
+local flightMapFixFrame = CreateFrame("Frame")
+flightMapFixFrame:RegisterEvent("ADDON_LOADED")
+flightMapFixFrame:SetScript("OnEvent", function(self, event, addonName)
+  if addonName == "Blizzard_FlightMap" then
+
+    local function OnPinReleased(pinPool, pin)
+      local map = pin:GetMap();
+      if map then
+        map:UnregisterPin(pin);
+      end
+
+      Pool_HideAndClearAnchors(pinPool, pin);
+      pin:OnReleased();
+
+      pin.pinTemplate = nil;
+      pin.owningMap = nil;
+    end
+
+    local function OnPinMouseUp(pin, button, upInside)
+      pin:OnMouseUp(button, upInside);
+      if upInside then
+        pin:OnClick(button);
+      end
+    end
+
+    function FlightMapFrame:AcquirePin(pinTemplate, ...)
+
+      if not self.pinPools[pinTemplate] then
+        local pinTemplateType = self:GetPinTemplateType(pinTemplate);
+        self.pinPools[pinTemplate] = CreateFramePool(pinTemplateType, self:GetCanvas(), pinTemplate, OnPinReleased);
+      end
+
+      local pin, newPin = self.pinPools[pinTemplate]:Acquire();
+
+      pin.pinTemplate = pinTemplate;
+      pin.owningMap = self;
+
+      if newPin then
+        local isMouseClickEnabled = pin:IsMouseClickEnabled();
+        local isMouseMotionEnabled = pin:IsMouseMotionEnabled();
+
+        if isMouseClickEnabled then
+          pin:SetScript("OnMouseUp", OnPinMouseUp);
+          pin:SetScript("OnMouseDown", pin.OnMouseDown);
+
+          if pin:IsObjectType("Button") then
+            pin:SetScript("OnClick", nil);
+          end
+        end
+
+        if isMouseMotionEnabled then
+          if newPin and not pin:DisableInheritedMotionScriptsWarning() then
+            assert(pin:GetScript("OnEnter") == nil);
+            assert(pin:GetScript("OnLeave") == nil);
+          end
+          pin:SetScript("OnEnter", pin.OnMouseEnter);
+          pin:SetScript("OnLeave", pin.OnMouseLeave);
+        end
+
+        pin:SetMouseClickEnabled(isMouseClickEnabled);
+        pin:SetMouseMotionEnabled(isMouseMotionEnabled);
+      end
+
+      if newPin then
+        pin:OnLoad();
+      end
+
+      self.ScrollContainer:MarkCanvasDirty();
+      pin:Show();
+
+      pin:OnAcquired(...);
+
+      -- Ludius change to prevent taint:
+      if not InCombatLockdown() then
+        pin:CheckMouseButtonPassthrough("RightButton");
+      else
+        reloadAfterCombat = true
+      end
+
+      self:RegisterPin(pin);
+
+      return pin;
+    end
+
+    self:UnregisterEvent("ADDON_LOADED")
+  end
+end)
+
+
 -- No idea if we need this. But better be on the safe side.
 local leaveCombatFrame = CreateFrame("Frame")
 leaveCombatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
@@ -211,8 +326,9 @@ end
 -- or when clicking on the ShowMapButton of QuestLogPopupDetailFrame.
 -- During combat, QuestMapFrame_OpenToQuestDetails does not manage
 -- to bring up WorldMapFrame and hide EncounterJournal and QuestLogPopupDetailFrame.
-local OriginalQuestMapFrame_OpenToQuestDetails = QuestMapFrame_OpenToQuestDetails
-QuestMapFrame_OpenToQuestDetails = function(...)
+-- Using hooksecurefunc to avoid tainting the global function, which would spread
+-- to UseQuestLogSpecialItem() and other protected quest functions.
+hooksecurefunc("QuestMapFrame_OpenToQuestDetails", function(...)
 
   if InCombatLockdown() then
     if not WorldMapFrame:IsShown() then
@@ -226,9 +342,7 @@ QuestMapFrame_OpenToQuestDetails = function(...)
   if QuestFrame:IsShown() then
     QuestFrame_OnHide()
   end
-
-  OriginalQuestMapFrame_OpenToQuestDetails(...)
-end
+end)
 
 
 
@@ -237,31 +351,36 @@ end
 -- on a quest tracker entry and select "Open Quest Details".
 -- During combat, QuestLogPopupDetailFrame_Show does not manage to
 -- bring up QuestLogPopupDetailFrame, so we have to show it manually.
-local OriginalQuestLogPopupDetailFrame_Show = QuestLogPopupDetailFrame_Show
-QuestLogPopupDetailFrame_Show = function(...)
+-- Using hooksecurefunc to avoid tainting the global function, which would spread
+-- to UseQuestLogSpecialItem() and other protected quest functions.
 
+-- Track the last quest ID shown before the function runs, to detect toggle requests
+local lastShownQuestID = nil
+QuestLogPopupDetailFrame:HookScript("OnShow", function(self)
+  lastShownQuestID = self.questID
+end)
+QuestLogPopupDetailFrame:HookScript("OnHide", function(self)
+  lastShownQuestID = nil
+end)
+
+hooksecurefunc("QuestLogPopupDetailFrame_Show", function(questLogIndex)
   if InCombatLockdown() then
+    local questID = C_QuestLog.GetQuestIDForLogIndex(questLogIndex)
 
+    -- If the frame was already showing this quest, the user wants to toggle it off
+    if lastShownQuestID and lastShownQuestID == questID then
+      QuestLogPopupDetailFrame:Hide()
+      return
+    end
+
+    -- Otherwise, ensure the frame is visible and raised
     if not QuestLogPopupDetailFrame:IsShown() then
       QuestLogPopupDetailFrame:Show()
-
     else
-      -- If QuestLogPopupDetailFrame is already shown for the clicked quest,
-      -- it should be closed, which QuestLogPopupDetailFrame_Show with
-      -- its HideUIPanel() also cannot do during combat.
-      local questLogIndex = ...
-      local questID = C_QuestLog.GetQuestIDForLogIndex(questLogIndex)
-      if QuestLogPopupDetailFrame.questID == questID then
-        QuestLogPopupDetailFrame:Hide()
-        return
-      else
-        QuestLogPopupDetailFrame:Raise()
-      end
+      QuestLogPopupDetailFrame:Raise()
     end
   end
-
-  OriginalQuestLogPopupDetailFrame_Show(...)
-end
+end)
 
 
 
