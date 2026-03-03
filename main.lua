@@ -164,7 +164,7 @@ end
 WorldMapFrame.ScrollContainer:SetMouseWheelZoomMode(MAP_CANVAS_MOUSE_WHEEL_ZOOM_BEHAVIOR_NONE)
 
 -- Override mouse wheel for custom zoom behavior.
-WorldMapFrame.ScrollContainer:SetScript("OnMouseWheel", function(self, delta)
+WorldMapFrame.ScrollContainer:HookScript("OnMouseWheel", function(self, delta)
 
   -- If we are currently zooming, we take currentTargetScale as the current scale.
   local currentScale = currentTargetScale or self:GetCanvasScale()

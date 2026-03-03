@@ -32,6 +32,54 @@ end)
 
 
 -- ######################################################################################
+-- ### Prevent PerformEmote/CancelEmote taint.                                        ###
+-- ### WorldMapMixin:OnShow() calls C_ChatInfo.PerformEmote("READ", nil, true) and    ###
+-- ### WorldMapMixin:OnHide() calls C_ChatInfo.CancelEmote(), both of which are       ###
+-- ### protected. Because we override AcquirePin below (to prevent other taint), the  ###
+-- ### execution context becomes insecure and these calls trigger                     ###
+-- ### ADDON_ACTION_FORBIDDEN (e.g. in battlegrounds).                                ###
+-- ###                                                                                ###
+-- ### Overriding `WorldMapFrame.OnShow` as a table method does NOT work here because ###
+-- ### the XML `<OnShow method="OnShow"/>` captures a direct function reference at    ###
+-- ### mixin time, bypassing Lua table lookups at runtime. We must use SetScript to   ###
+-- ### intercept the actual script handler.                                           ###
+-- ###                                                                                ###
+-- ### Fix: Use SetScript to wrap OnShow/OnHide, temporarily replacing                ###
+-- ### PerformEmote/CancelEmote with no-ops when inside a PvP instance.               ###
+-- ######################################################################################
+do
+  local function IsInPvPInstance()
+    local isInstance, instanceType = IsInInstance()
+    return isInstance and instanceType == "pvp"
+  end
+
+  local origOnShowHandler = WorldMapFrame:GetScript("OnShow")
+  WorldMapFrame:SetScript("OnShow", function(self, ...)
+    if IsInPvPInstance() or not PWM_config.showReadingEmote then
+      local origPerformEmote = C_ChatInfo.PerformEmote
+      C_ChatInfo.PerformEmote = function() end
+      origOnShowHandler(self, ...)
+      C_ChatInfo.PerformEmote = origPerformEmote
+    else
+      origOnShowHandler(self, ...)
+    end
+  end)
+
+  local origOnHideHandler = WorldMapFrame:GetScript("OnHide")
+  WorldMapFrame:SetScript("OnHide", function(self, ...)
+    if IsInPvPInstance() or not PWM_config.showReadingEmote then
+      local origCancelEmote = C_ChatInfo.CancelEmote
+      C_ChatInfo.CancelEmote = function() end
+      origOnHideHandler(self, ...)
+      C_ChatInfo.CancelEmote = origCancelEmote
+    else
+      origOnHideHandler(self, ...)
+    end
+  end)
+end
+
+
+-- ######################################################################################
 -- ### Preventing taint, which would otherwise lead to errors during combat lockdown. ###
 -- ######################################################################################
 
@@ -167,6 +215,97 @@ flightMapFixFrame:SetScript("OnEvent", function(self, event, addonName)
     end
 
     function FlightMapFrame:AcquirePin(pinTemplate, ...)
+
+      if not self.pinPools[pinTemplate] then
+        local pinTemplateType = self:GetPinTemplateType(pinTemplate);
+        self.pinPools[pinTemplate] = CreateFramePool(pinTemplateType, self:GetCanvas(), pinTemplate, OnPinReleased);
+      end
+
+      local pin, newPin = self.pinPools[pinTemplate]:Acquire();
+
+      pin.pinTemplate = pinTemplate;
+      pin.owningMap = self;
+
+      if newPin then
+        local isMouseClickEnabled = pin:IsMouseClickEnabled();
+        local isMouseMotionEnabled = pin:IsMouseMotionEnabled();
+
+        if isMouseClickEnabled then
+          pin:SetScript("OnMouseUp", OnPinMouseUp);
+          pin:SetScript("OnMouseDown", pin.OnMouseDown);
+
+          if pin:IsObjectType("Button") then
+            pin:SetScript("OnClick", nil);
+          end
+        end
+
+        if isMouseMotionEnabled then
+          if newPin and not pin:DisableInheritedMotionScriptsWarning() then
+            assert(pin:GetScript("OnEnter") == nil);
+            assert(pin:GetScript("OnLeave") == nil);
+          end
+          pin:SetScript("OnEnter", pin.OnMouseEnter);
+          pin:SetScript("OnLeave", pin.OnMouseLeave);
+        end
+
+        pin:SetMouseClickEnabled(isMouseClickEnabled);
+        pin:SetMouseMotionEnabled(isMouseMotionEnabled);
+      end
+
+      if newPin then
+        pin:OnLoad();
+      end
+
+      self.ScrollContainer:MarkCanvasDirty();
+      pin:Show();
+
+      pin:OnAcquired(...);
+
+      -- Ludius change to prevent taint:
+      if not InCombatLockdown() then
+        pin:CheckMouseButtonPassthrough("RightButton");
+      else
+        reloadAfterCombat = true
+      end
+
+      self:RegisterPin(pin);
+
+      return pin;
+    end
+
+    self:UnregisterEvent("ADDON_LOADED")
+  end
+end)
+
+
+-- Same fix for BattlefieldMapFrame (mini BG map).
+-- BattlefieldMapFrame is load-on-demand, so we need to wait for it.
+local battlefieldMapFixFrame = CreateFrame("Frame")
+battlefieldMapFixFrame:RegisterEvent("ADDON_LOADED")
+battlefieldMapFixFrame:SetScript("OnEvent", function(self, event, addonName)
+  if addonName == "Blizzard_BattlefieldMap" then
+
+    local function OnPinReleased(pinPool, pin)
+      local map = pin:GetMap();
+      if map then
+        map:UnregisterPin(pin);
+      end
+
+      Pool_HideAndClearAnchors(pinPool, pin);
+      pin:OnReleased();
+
+      pin.pinTemplate = nil;
+      pin.owningMap = nil;
+    end
+
+    local function OnPinMouseUp(pin, button, upInside)
+      pin:OnMouseUp(button, upInside);
+      if upInside then
+        pin:OnClick(button);
+      end
+    end
+
+    function BattlefieldMapFrame:AcquirePin(pinTemplate, ...)
 
       if not self.pinPools[pinTemplate] then
         local pinTemplateType = self:GetPinTemplateType(pinTemplate);

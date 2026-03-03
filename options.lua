@@ -7,6 +7,7 @@ local CONFIG_DEFAULTS = {
   zoomTimeSeconds   = 0.3,
   autoCenterEnabled = true,
   doubleClickTime   = 0.25,
+  showReadingEmote  = true,
 }
 
 
@@ -98,7 +99,7 @@ Addon.OpenOptionsMenu = function()
 
     local submenu = mainMenu:CreateButton("Reset closed map")
     submenu:SetOnEnter(function(frame, desc)
-      OnEnterSubmenuFunction(frame, desc, "Reset closed map", "How long the map should remember its zoom and position after closing. Set to 'Never' to always restore the last used map state.")
+      OnEnterSubmenuFunction(frame, desc, "Reset closed map", "How long the map should remember its zoom and position after closing. Set to 'Never' to reset the map every time it is opened; like the game's default behavior.")
     end)
     submenu:SetOnLeave(function(frame)
       HideCustomTooltipDelayed(0.33)
@@ -165,5 +166,48 @@ Addon.OpenOptionsMenu = function()
     submenu:CreateRadio("Fast",     function() return PWM_config.zoomTimeSeconds == 0.15 end, function() PWM_config.zoomTimeSeconds = 0.15; return MenuResponse.Refresh end)
     submenu:CreateRadio("Disabled", function() return PWM_config.zoomTimeSeconds == 0    end, function() PWM_config.zoomTimeSeconds = 0;    return MenuResponse.Refresh end)
 
+
+    submenu = mainMenu:CreateButton("Miscellaneous")
+    submenu:SetOnEnter(function(frame, desc)
+      OnEnterSubmenuFunction(frame, desc, "Miscellaneous", "Additional settings for minor visual details.")
+    end)
+    submenu:SetOnLeave(function(frame)
+      HideCustomTooltipDelayed(0.33)
+    end)
+
+    submenu:CreateTitle("Miscellaneous")
+    local emoteCheckbox = submenu:CreateCheckbox(
+      "Show reading emote",
+      function()
+        return PWM_config.showReadingEmote
+      end,
+      function()
+        PWM_config.showReadingEmote = not PWM_config.showReadingEmote
+        if WorldMapFrame:IsShown() then
+          local isInstance, instanceType = IsInInstance()
+          local inPvP = isInstance and instanceType == "pvp"
+          if PWM_config.showReadingEmote and not inPvP then
+            C_ChatInfo.PerformEmote("READ", nil, true)
+          else
+            C_ChatInfo.CancelEmote()
+          end
+        end
+      end
+    )
+    emoteCheckbox:SetOnEnter(function(frame, desc)
+      ShowCustomTooltip(frame, "Show reading emote", "When opening the world map, your character performs a map-reading animation. Uncheck to disable it.\n\nNote: This animation is always suppressed inside battlegrounds to avoid a World of Warcraft restriction that would otherwise cause an error.")
+    end)
+    emoteCheckbox:SetOnLeave(function(frame)
+      HideCustomTooltipDelayed(0.33)
+    end)
+
   end)
 end
+
+
+-- Close the options context menu when the world map closes.
+WorldMapFrame:HookScript("OnHide", function()
+  if Menu and Menu.GetManager then
+    Menu.GetManager():CloseMenus()
+  end
+end)
