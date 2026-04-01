@@ -34,18 +34,17 @@ end)
 -- ######################################################################################
 -- ### Prevent PerformEmote/CancelEmote taint.                                        ###
 -- ### WorldMapMixin:OnShow() calls C_ChatInfo.PerformEmote("READ", nil, true) and    ###
--- ### WorldMapMixin:OnHide() calls C_ChatInfo.CancelEmote(), both of which are       ###
--- ### protected. Because we override AcquirePin below (to prevent other taint), the  ###
--- ### execution context becomes insecure and these calls trigger                     ###
--- ### ADDON_ACTION_FORBIDDEN (e.g. in battlegrounds).                                ###
+-- ### WorldMapMixin:OnHide() calls C_ChatInfo.CancelEmote(). Both are protected      ###
+-- ### in PvP instances. Because our addon taints WorldMapFrame.mapID, Blizzard's     ###
+-- ### OnShow reads the tainted value and the execution context becomes insecure -    ###
+-- ### causing ADDON_ACTION_FORBIDDEN for PerformEmote/CancelEmote in PvP.            ###
 -- ###                                                                                ###
--- ### Overriding `WorldMapFrame.OnShow` as a table method does NOT work here because ###
--- ### the XML `<OnShow method="OnShow"/>` captures a direct function reference at    ###
--- ### mixin time, bypassing Lua table lookups at runtime. We must use SetScript to   ###
--- ### intercept the actual script handler.                                           ###
+-- ### Fix: wrap both API functions to skip in PvP instances. This avoids the error   ###
+-- ### without SetScript (which would make all of OnShow addon-originated, causing    ###
+-- ### MoneyFrame taint and "secret number" errors).                                  ###
 -- ###                                                                                ###
--- ### Fix: Use SetScript to wrap OnShow/OnHide, temporarily replacing                ###
--- ### PerformEmote/CancelEmote with no-ops when inside a PvP instance.               ###
+-- ### Additionally, a HookScript post-hook cancels the emote outside PvP when        ###
+-- ### the user has disabled the reading emote in the options.                        ###
 -- ######################################################################################
 do
   local function IsInPvPInstance()
@@ -53,339 +52,156 @@ do
     return isInstance and instanceType == "pvp"
   end
 
-  local origOnShowHandler = WorldMapFrame:GetScript("OnShow")
-  WorldMapFrame:SetScript("OnShow", function(self, ...)
-    if IsInPvPInstance() or not PWM_config.showReadingEmote then
-      local origPerformEmote = C_ChatInfo.PerformEmote
-      C_ChatInfo.PerformEmote = function() end
-      origOnShowHandler(self, ...)
-      C_ChatInfo.PerformEmote = origPerformEmote
-    else
-      origOnShowHandler(self, ...)
-    end
-  end)
+  local origPerformEmote = C_ChatInfo.PerformEmote
+  C_ChatInfo.PerformEmote = function(emote, ...)
+    if IsInPvPInstance() then return end
+    return origPerformEmote(emote, ...)
+  end
 
-  local origOnHideHandler = WorldMapFrame:GetScript("OnHide")
-  WorldMapFrame:SetScript("OnHide", function(self, ...)
-    if IsInPvPInstance() or not PWM_config.showReadingEmote then
-      local origCancelEmote = C_ChatInfo.CancelEmote
-      C_ChatInfo.CancelEmote = function() end
-      origOnHideHandler(self, ...)
-      C_ChatInfo.CancelEmote = origCancelEmote
-    else
-      origOnHideHandler(self, ...)
-    end
-  end)
+  local origCancelEmote = C_ChatInfo.CancelEmote
+  C_ChatInfo.CancelEmote = function(...)
+    if IsInPvPInstance() then return end
+    return origCancelEmote(...)
+  end
 end
+
+WorldMapFrame:HookScript("OnShow", function(self)
+  if not PWM_config.showReadingEmote then
+    C_ChatInfo.CancelEmote()
+  end
+end)
 
 
 -- ######################################################################################
 -- ### Preventing taint, which would otherwise lead to errors during combat lockdown. ###
 -- ######################################################################################
 
+-- Our addon writes to WorldMapFrame.mapID, permanently tainting that property.
+-- When Blizzard's secure OnShow -> SetMapID reads the tainted mapID during
+-- combat, the execution context becomes insecure, and ALL protected calls
+-- in the AcquirePin chain (SetPassThroughButtons, SetPropagateMouseClicks)
+-- fail with ADDON_ACTION_BLOCKED. securecallfunction does NOT help - WoW
+-- tracks the original writer, not the execution wrapper.
+--
+-- Fix: we patch SetPassThroughButtons and SetPropagateMouseClicks directly
+-- on every pin INSTANCE (shadowing the C widget metatable methods) to skip
+-- during combat. We wrap each pin pool's Acquire method so pins are patched
+-- at creation time, BEFORE AcquirePin calls them. See the do-block below.
+--
+-- We intentionally do NOT override AcquirePin itself - doing so would make
+-- pin:SetScript("OnEnter"/...) calls register handlers as addon-originated,
+-- causing "secret number" taint errors on pin hover during combat. Our
+-- pool.Acquire wrapper returns before AcquirePin's SetScript calls, so
+-- handler origins stay Blizzard-originated.
+
 
 -- To do a WorldMapFrame:OnMapChanged() again when combat ends.
 -- Just in case this might be important.
-local reloadAfterCombat = false
+Addon.reloadAfterCombat = false
 
 
--- Overriding Blizzard_SharedMapDataProviders/SharedMapPoiTemplates.lua, L518
-function SuperTrackablePinMixin:OnAcquired(...)
-  if not self:IsSuperTrackingExternallyHandled() then
-
-    -- Ludius change to prevent taint:
-    if not InCombatLockdown() then
-      self:UpdateMousePropagation();
-    else
-      reloadAfterCombat = true
-    end
-
-    self:UpdateSuperTrackedState(C_SuperTrack[self:GetSuperTrackAccessorAPIName()]());
-  end
-end
-
--- Overriding Blizzard_MapCanvas/Blizzard_MapCanvas.lua, L230
-do
-  local function OnPinReleased(pinPool, pin)
-    local map = pin:GetMap();
-    if map then
-      map:UnregisterPin(pin);
-    end
-
-    Pool_HideAndClearAnchors(pinPool, pin);
-    pin:OnReleased();
-
-    pin.pinTemplate = nil;
-    pin.owningMap = nil;
-  end
-
-  local function OnPinMouseUp(pin, button, upInside)
-    pin:OnMouseUp(button, upInside);
-    if upInside then
-      pin:OnClick(button);
-    end
-  end
-
-  function WorldMapFrame:AcquirePin(pinTemplate, ...)
-
-    if not self.pinPools[pinTemplate] then
-      local pinTemplateType = self:GetPinTemplateType(pinTemplate);
-      self.pinPools[pinTemplate] = CreateFramePool(pinTemplateType, self:GetCanvas(), pinTemplate, OnPinReleased);
-    end
-
-    local pin, newPin = self.pinPools[pinTemplate]:Acquire();
-
-    pin.pinTemplate = pinTemplate;
-    pin.owningMap = self;
-
-    if newPin then
-      local isMouseClickEnabled = pin:IsMouseClickEnabled();
-      local isMouseMotionEnabled = pin:IsMouseMotionEnabled();
-
-      if isMouseClickEnabled then
-        pin:SetScript("OnMouseUp", OnPinMouseUp);
-        pin:SetScript("OnMouseDown", pin.OnMouseDown);
-
-        if pin:IsObjectType("Button") then
-          pin:SetScript("OnClick", nil);
-        end
-      end
-
-      if isMouseMotionEnabled then
-        if newPin and not pin:DisableInheritedMotionScriptsWarning() then
-          assert(pin:GetScript("OnEnter") == nil);
-          assert(pin:GetScript("OnLeave") == nil);
-        end
-        pin:SetScript("OnEnter", pin.OnMouseEnter);
-        pin:SetScript("OnLeave", pin.OnMouseLeave);
-      end
-
-      pin:SetMouseClickEnabled(isMouseClickEnabled);
-      pin:SetMouseMotionEnabled(isMouseMotionEnabled);
-    end
-
-    if newPin then
-      pin:OnLoad();
-    end
-
-    self.ScrollContainer:MarkCanvasDirty();
-    pin:Show();
-
-    pin:OnAcquired(...);
-
-    -- Ludius change to prevent taint:
-    if not InCombatLockdown() then
-      pin:CheckMouseButtonPassthrough("RightButton");
-    else
-      reloadAfterCombat = true
-    end
-
-    self:RegisterPin(pin);
-
-    return pin;
-  end
-end
-
-
--- Same fix for FlightMapFrame (taxi map).
--- FlightMapFrame is load-on-demand, so we need to wait for it.
-local flightMapFixFrame = CreateFrame("Frame")
-flightMapFixFrame:RegisterEvent("ADDON_LOADED")
-flightMapFixFrame:SetScript("OnEvent", function(self, event, addonName)
-  if addonName == "Blizzard_FlightMap" then
-
-    local function OnPinReleased(pinPool, pin)
-      local map = pin:GetMap();
-      if map then
-        map:UnregisterPin(pin);
-      end
-
-      Pool_HideAndClearAnchors(pinPool, pin);
-      pin:OnReleased();
-
-      pin.pinTemplate = nil;
-      pin.owningMap = nil;
-    end
-
-    local function OnPinMouseUp(pin, button, upInside)
-      pin:OnMouseUp(button, upInside);
-      if upInside then
-        pin:OnClick(button);
-      end
-    end
-
-    function FlightMapFrame:AcquirePin(pinTemplate, ...)
-
-      if not self.pinPools[pinTemplate] then
-        local pinTemplateType = self:GetPinTemplateType(pinTemplate);
-        self.pinPools[pinTemplate] = CreateFramePool(pinTemplateType, self:GetCanvas(), pinTemplate, OnPinReleased);
-      end
-
-      local pin, newPin = self.pinPools[pinTemplate]:Acquire();
-
-      pin.pinTemplate = pinTemplate;
-      pin.owningMap = self;
-
-      if newPin then
-        local isMouseClickEnabled = pin:IsMouseClickEnabled();
-        local isMouseMotionEnabled = pin:IsMouseMotionEnabled();
-
-        if isMouseClickEnabled then
-          pin:SetScript("OnMouseUp", OnPinMouseUp);
-          pin:SetScript("OnMouseDown", pin.OnMouseDown);
-
-          if pin:IsObjectType("Button") then
-            pin:SetScript("OnClick", nil);
-          end
-        end
-
-        if isMouseMotionEnabled then
-          if newPin and not pin:DisableInheritedMotionScriptsWarning() then
-            assert(pin:GetScript("OnEnter") == nil);
-            assert(pin:GetScript("OnLeave") == nil);
-          end
-          pin:SetScript("OnEnter", pin.OnMouseEnter);
-          pin:SetScript("OnLeave", pin.OnMouseLeave);
-        end
-
-        pin:SetMouseClickEnabled(isMouseClickEnabled);
-        pin:SetMouseMotionEnabled(isMouseMotionEnabled);
-      end
-
-      if newPin then
-        pin:OnLoad();
-      end
-
-      self.ScrollContainer:MarkCanvasDirty();
-      pin:Show();
-
-      pin:OnAcquired(...);
-
-      -- Ludius change to prevent taint:
-      if not InCombatLockdown() then
-        pin:CheckMouseButtonPassthrough("RightButton");
-      else
-        reloadAfterCombat = true
-      end
-
-      self:RegisterPin(pin);
-
-      return pin;
-    end
-
-    self:UnregisterEvent("ADDON_LOADED")
-  end
-end)
-
-
--- Same fix for BattlefieldMapFrame (mini BG map).
--- BattlefieldMapFrame is load-on-demand, so we need to wait for it.
-local battlefieldMapFixFrame = CreateFrame("Frame")
-battlefieldMapFixFrame:RegisterEvent("ADDON_LOADED")
-battlefieldMapFixFrame:SetScript("OnEvent", function(self, event, addonName)
-  if addonName == "Blizzard_BattlefieldMap" then
-
-    local function OnPinReleased(pinPool, pin)
-      local map = pin:GetMap();
-      if map then
-        map:UnregisterPin(pin);
-      end
-
-      Pool_HideAndClearAnchors(pinPool, pin);
-      pin:OnReleased();
-
-      pin.pinTemplate = nil;
-      pin.owningMap = nil;
-    end
-
-    local function OnPinMouseUp(pin, button, upInside)
-      pin:OnMouseUp(button, upInside);
-      if upInside then
-        pin:OnClick(button);
-      end
-    end
-
-    function BattlefieldMapFrame:AcquirePin(pinTemplate, ...)
-
-      if not self.pinPools[pinTemplate] then
-        local pinTemplateType = self:GetPinTemplateType(pinTemplate);
-        self.pinPools[pinTemplate] = CreateFramePool(pinTemplateType, self:GetCanvas(), pinTemplate, OnPinReleased);
-      end
-
-      local pin, newPin = self.pinPools[pinTemplate]:Acquire();
-
-      pin.pinTemplate = pinTemplate;
-      pin.owningMap = self;
-
-      if newPin then
-        local isMouseClickEnabled = pin:IsMouseClickEnabled();
-        local isMouseMotionEnabled = pin:IsMouseMotionEnabled();
-
-        if isMouseClickEnabled then
-          pin:SetScript("OnMouseUp", OnPinMouseUp);
-          pin:SetScript("OnMouseDown", pin.OnMouseDown);
-
-          if pin:IsObjectType("Button") then
-            pin:SetScript("OnClick", nil);
-          end
-        end
-
-        if isMouseMotionEnabled then
-          if newPin and not pin:DisableInheritedMotionScriptsWarning() then
-            assert(pin:GetScript("OnEnter") == nil);
-            assert(pin:GetScript("OnLeave") == nil);
-          end
-          pin:SetScript("OnEnter", pin.OnMouseEnter);
-          pin:SetScript("OnLeave", pin.OnMouseLeave);
-        end
-
-        pin:SetMouseClickEnabled(isMouseClickEnabled);
-        pin:SetMouseMotionEnabled(isMouseMotionEnabled);
-      end
-
-      if newPin then
-        pin:OnLoad();
-      end
-
-      self.ScrollContainer:MarkCanvasDirty();
-      pin:Show();
-
-      pin:OnAcquired(...);
-
-      -- Ludius change to prevent taint:
-      if not InCombatLockdown() then
-        pin:CheckMouseButtonPassthrough("RightButton");
-      else
-        reloadAfterCombat = true
-      end
-
-      self:RegisterPin(pin);
-
-      return pin;
-    end
-
-    self:UnregisterEvent("ADDON_LOADED")
-  end
-end)
-
-
--- No idea if we need this. But better be on the safe side.
+-- Refresh map state once combat ends.
 local leaveCombatFrame = CreateFrame("Frame")
 leaveCombatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 leaveCombatFrame:SetScript("OnEvent", function()
-  -- I still got the taint once, so I rather double-check!
   if InCombatLockdown() then return end
 
-  if reloadAfterCombat and WorldMapFrame:IsShown() then
+  if Addon.reloadAfterCombat and WorldMapFrame:IsShown() then
     WorldMapFrame:OnMapChanged()
     Addon.PlayerPingAnimation(false)
   end
-  reloadAfterCombat = false
+  Addon.reloadAfterCombat = false
 end)
 
 
+-- Patch every map pin INSTANCE to prevent taint errors during combat.
+-- Our addon writes to WorldMapFrame.mapID, permanently tainting it; during combat
+-- the tainted execution context causes:
+--  (1) ADDON_ACTION_BLOCKED on SetPassThroughButtons/SetPropagateMouseClicks
+--      (called by AcquirePin -> CheckMouseButtonPassthrough).
+--  (2) "secret number" errors in tooltip code when hovering pins - data
+--      providers set pin properties (poiInfo, questID, etc.) during the
+--      tainted OnShow context, so reading those properties in OnMouseEnter
+--      taints the tooltip chain, making GetWidth() return secret numbers.
+--
+-- Fix (1): shadow SetPassThroughButtons/SetPropagateMouseClicks on each
+-- pin instance to skip during combat.
+-- Fix (2): shadow OnMouseEnter/OnMouseLeave on each pin instance to wrap
+-- in pcall during combat - the tooltip may not display perfectly but no
+-- errors get reported.
+--
+-- PatchPin runs inside each pool's Acquire wrapper (before AcquirePin
+-- sets OnEnter to pin.OnMouseEnter), so AcquirePin picks up
+-- our wrappers automatically. A __newindex metatable on pinPools catches
+-- new pools as Blizzard creates them. Because patches are on the pin
+-- instance, they survive pool recycling across map opens.
+do
+  local function PatchPin(pin)
+    if pin.pwm_protected_patched then return end
+    pin.pwm_protected_patched = true
 
+    local origSetPassThroughButtons = pin.SetPassThroughButtons
+    pin.SetPassThroughButtons = function(self, ...)
+      if InCombatLockdown() then Addon.reloadAfterCombat = true; return end
+      return origSetPassThroughButtons(self, ...)
+    end
 
+    local origSetPropagateMouseClicks = pin.SetPropagateMouseClicks
+    pin.SetPropagateMouseClicks = function(self, ...)
+      if InCombatLockdown() then Addon.reloadAfterCombat = true; return end
+      return origSetPropagateMouseClicks(self, ...)
+    end
+
+    local origOnMouseEnter = pin.OnMouseEnter
+    if origOnMouseEnter then
+      pin.OnMouseEnter = function(self, ...)
+        if InCombatLockdown() then
+          pcall(origOnMouseEnter, self, ...)
+          return
+        end
+        return origOnMouseEnter(self, ...)
+      end
+    end
+
+    local origOnMouseLeave = pin.OnMouseLeave
+    if origOnMouseLeave then
+      pin.OnMouseLeave = function(self, ...)
+        if InCombatLockdown() then
+          pcall(origOnMouseLeave, self, ...)
+          return
+        end
+        return origOnMouseLeave(self, ...)
+      end
+    end
+  end
+
+  local function WrapPoolAcquire(pool)
+    if pool.pwm_acquire_wrapped then return end
+    pool.pwm_acquire_wrapped = true
+
+    local origAcquire = pool.Acquire
+    pool.Acquire = function(self, ...)
+      local pin, isNew = origAcquire(self, ...)
+      if pin and isNew then
+        PatchPin(pin)
+      end
+      return pin, isNew
+    end
+  end
+
+  -- Wrap existing pools (created before our addon loaded, if any).
+  for pinTemplate, pool in pairs(WorldMapFrame.pinPools) do
+    WrapPoolAcquire(pool)
+  end
+
+  -- Catch future pool creation via __newindex on the pinPools table.
+  setmetatable(WorldMapFrame.pinPools, {
+    __newindex = function(t, pinTemplate, pool)
+      rawset(t, pinTemplate, pool)
+      WrapPoolAcquire(pool)
+    end
+  })
+end
 
 
 

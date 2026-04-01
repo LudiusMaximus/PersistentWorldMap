@@ -7,6 +7,7 @@ local C_Map_GetMapArtID                  = _G.C_Map.GetMapArtID
 
 local Clamp                     = _G.Clamp
 local GetTime                   = _G.GetTime
+local InCombatLockdown          = _G.InCombatLockdown
 local WorldMapFrame             = _G.WorldMapFrame
 
 
@@ -88,9 +89,15 @@ local function SaveMapState()
 end
 
 
--- Called when reopenning the map.
+-- Called when reopening the map.
+-- During combat, pin instances have patched SetPassThroughButtons and
+-- SetPropagateMouseClicks (see taintPrevent.lua) so pins are created
+-- without errors. reloadAfterCombat refreshes passthrough after combat.
 local function RestoreMapState()
   if lastMapID and lastScale and lastScrollX and lastScrollY then
+    if InCombatLockdown() then
+      Addon.reloadAfterCombat = true
+    end
     -- print("restoring", lastMapID, lastScale, lastScrollX, lastScrollY)
 
     -- Selected content of WorldMapFrame:SetMapID(lastMapID):
@@ -106,7 +113,7 @@ local function RestoreMapState()
       end
     end
 
-    
+
     WorldMapFrame.ScrollContainer:InstantPanAndZoom(lastScale, lastScrollX, lastScrollY, true)
     WorldMapFrame:OnMapChanged()
 
@@ -178,6 +185,9 @@ end)
 
 
 Addon.ResetMap = function(preserveZoom)
+  if InCombatLockdown() then
+    Addon.reloadAfterCombat = true
+  end
 
   local previousScale = WorldMapFrame.ScrollContainer.currentScale
 
@@ -185,14 +195,14 @@ Addon.ResetMap = function(preserveZoom)
   WorldMapFrame:SetMapID(MapUtil_GetDisplayableMapForPlayer())
 
   if preserveZoom and previousScale then
-    
+
     -- print("restoring", previousScale)
-  
+
     previousScale = Clamp(previousScale, WorldMapFrame.ScrollContainer:GetScaleForMinZoom(), WorldMapFrame.ScrollContainer:GetScaleForMaxZoom())
     WorldMapFrame.ScrollContainer.currentScale = previousScale
     WorldMapFrame.ScrollContainer.targetScale = previousScale
     WorldMapFrame:OnMapChanged()
-    
+
     -- TODO: Find out if the player pin has changed its absolute position and only ping then.
     -- Addon.PlayerPingAnimation(false)
   else
