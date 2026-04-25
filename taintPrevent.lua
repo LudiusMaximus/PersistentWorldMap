@@ -39,9 +39,9 @@ end)
 -- ### OnShow reads the tainted value and the execution context becomes insecure -    ###
 -- ### causing ADDON_ACTION_FORBIDDEN for PerformEmote/CancelEmote in PvP.            ###
 -- ###                                                                                ###
--- ### Fix: wrap both API functions to skip in PvP instances. This avoids the error   ###
--- ### without SetScript (which would make all of OnShow addon-originated, causing    ###
--- ### MoneyFrame taint and "secret number" errors).                                  ###
+-- ### Fix: wrap both API functions to skip the "READ" emote in PvP instances.        ###
+-- ### This avoids the error without SetScript (which would make all of OnShow        ###
+-- ### addon-originated, causing MoneyFrame taint and "secret number" errors).        ###
 -- ###                                                                                ###
 -- ### Additionally, a HookScript post-hook cancels the emote outside PvP when        ###
 -- ### the user has disabled the reading emote in the options.                        ###
@@ -54,7 +54,7 @@ do
 
   local origPerformEmote = C_ChatInfo.PerformEmote
   C_ChatInfo.PerformEmote = function(emote, ...)
-    if IsInPvPInstance() then return end
+    if IsInPvPInstance() and emote == "READ" then return end
     return origPerformEmote(emote, ...)
   end
 
