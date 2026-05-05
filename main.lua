@@ -375,9 +375,11 @@ updateMapFrame:RegisterEvent("TAXI_NODE_STATUS_CHANGED")
 updateMapFrame:RegisterEvent("TREASURE_PICKER_CACHE_FLUSH")
 -- To refresh map after trader's tenders chest reward collected.
 updateMapFrame:RegisterEvent("CHEST_REWARDS_UPDATED_FROM_SERVER")
+-- To refresh map when neighborhood house ownerships change.
+updateMapFrame:RegisterEvent("NEIGHBORHOOD_INFO_UPDATED")
 updateMapFrame:SetScript("OnEvent", function()
   -- Sometimes does not work right away.
-  C_Timer.NewTimer(0.2, function()
+  C_Timer.NewTimer(0.5, function()
     if not WorldMapFrame:IsShown() then return end
     WorldMapFrame:OnMapChanged()
     Addon.PlayerPingAnimation(false)
