@@ -117,6 +117,40 @@ local function RestoreMapState()
     WorldMapFrame.ScrollContainer:InstantPanAndZoom(lastScale, lastScrollX, lastScrollY, true)
     WorldMapFrame:OnMapChanged()
 
+    -- Force third-party addon pins to resize for the restored zoom.
+    -- Blizzard's own pins re-scale automatically because they inherit
+    -- MapCanvasPinMixin:OnCanvasScaleChanged, which InstantPanAndZoom fires
+    -- via MapCanvasMixin:OnCanvasScaleChanged. But many third-party map
+    -- addons (RareScanner is the prompting example; the pattern is common)
+    -- attach their pins as children/grandchildren of
+    -- WorldMapFrame.ScrollContainer.Child and expose a `UpdateScale`
+    -- method that is only run once at acquire time -- they don't subscribe
+    -- to OnCanvasScaleChanged. Without intervention their pins stay at
+    -- whatever size they computed at acquire-time, which is wrong when the
+    -- restored zoom differs from the canvas scale at that moment.
+    --
+    -- Walk the canvas descendant tree and call :UpdateScale() on every
+    -- frame that exposes it. Wrapped in pcall so a buggy addon's
+    -- UpdateScale can't break our restore. The depth cap is just a safety
+    -- limit -- RareScanner's pins are at depth 2, leave room for nested
+    -- containers.
+    do
+      local function Walk(frame, depth)
+        if not frame or depth > 4 then return end
+        if type(frame.UpdateScale) == "function" then
+          pcall(frame.UpdateScale, frame)
+        end
+        if frame.GetChildren then
+          for _, child in ipairs({ frame:GetChildren() }) do
+            Walk(child, depth + 1)
+          end
+        end
+      end
+      if WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer.Child then
+        Walk(WorldMapFrame.ScrollContainer.Child, 0)
+      end
+    end
+
     lastViewedMapWasCurrentMap = (lastMapID == MapUtil_GetDisplayableMapForPlayer())
     CheckMap()
   end
