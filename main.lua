@@ -367,9 +367,9 @@ local updateMapFrame = CreateFrame("Frame")
 updateMapFrame:RegisterEvent("PLAYER_UNGHOST")
 -- Sometimes accepting (world) quests does not remove the exlamation mark.
 updateMapFrame:RegisterEvent("QUEST_ACCEPTED")
--- Just to be on the save side.
+-- Just to be on the safe side.
 updateMapFrame:RegisterEvent("QUEST_REMOVED")
--- Needed to change flightpoint icon colour after learning a new flightpoint. 
+-- Needed to change flightpoint icon colour after learning a new flightpoint.
 updateMapFrame:RegisterEvent("TAXI_NODE_STATUS_CHANGED")
 -- Update map after killing dungeon/raid boss.
 updateMapFrame:RegisterEvent("TREASURE_PICKER_CACHE_FLUSH")
@@ -385,6 +385,111 @@ updateMapFrame:SetScript("OnEvent", function()
     Addon.PlayerPingAnimation(false)
   end)
 end)
+
+
+-- RareScanner integration: refresh RareScanner's map pins after events that
+-- change pin state without triggering a world-map refresh.
+--
+-- Two such events exist:
+--
+-- (a) FILTER CHANGE via the scanner popup's two buttons. The popup (the
+--     global RARESCANNER_BUTTON frame) has a FilterEntityButton (adds to
+--     filter) and UnFilterEntityButton (removes from filter). Despite the
+--     visual impression of a single Stop/Go toggle, these are two distinct
+--     Button frames overlapping pixel-perfect at the same anchor; one is
+--     always hidden and the other shown. They share the same WoW global
+--     name "FilterEntityButton" (RareScanner passes the same string as the
+--     second arg to both CreateFrame calls -- /framestack shows that name
+--     regardless of which variant is currently visible), and are only
+--     distinguished by their field name on scanner_button. Clicking either
+--     calls RSConfigDB.SetNpcFiltered / SetContainerFiltered /
+--     SetEventFiltered, but RareScanner does NOT refresh the world map
+--     afterwards.
+--
+-- (b) ENTITY DETECTION via the scanner. When a vignette is detected,
+--     RSButtonHandler eventually calls RSRecentlySeenTracker.AddRecentlySeen,
+--     which marks the entity recently-seen (this is what flips the map pin
+--     to the PINK_*_TEXTURE "just detected" variant and updates the "last
+--     seen" timestamp in the pin's tooltip). AddRecentlySeen then forwards
+--     to RSRecentlySeenTracker.AddPendingAnimation WITHOUT the
+--     refreshWorldMap flag (see Core/Service/RSRecentlySeenTracker.lua line
+--     129), so the world map is not refreshed. After detection,
+--     scanner_button:ShowButton() surfaces the popup; that method is the
+--     closest reliably-hookable point to the detection.
+--
+-- (Other filter-change entry points already refresh on their own:
+-- RareScanner's world-map dropdown button does it via
+-- RSWorldMapButtonMixin:NotifyUpdate -> RSProvider.RefreshAllDataProviders.
+-- The Shift+Alt+click filter on a map pin -- RSEntityPinMixin:OnMouseDown
+-- in RareScanner -- calls RSProvider.RefreshAllDataProviders itself.)
+--
+-- We CAN'T just call WorldMapFrame:OnMapChanged() here (the way the
+-- updateMapFrame handler above does for game events): that only iterates
+-- WorldMapFrame.dataProviders, and RareScanner registers its pins on a
+-- separate RSWorldMap.dataProviders table that Blizzard's OnMapChanged
+-- doesn't touch (see RareScanner/Core/Libs/RSProvider.lua and
+-- /Core/Plugins/MapPlugin/MapCanvas/RSWorldMap.lua).
+--
+-- We also can't hooksecurefunc RSConfigDB.SetXxxFiltered or
+-- RSRecentlySeenTracker.AddRecentlySeen directly -- both live in RareScanner's
+-- private addon namespace and aren't globals. But two things ARE global and
+-- reachable:
+--   * RARESCANNER_BUTTON (the scanner popup frame) and its child buttons --
+--     hookable via HookScript on OnClick (filter buttons) and
+--     hooksecurefunc on its :ShowButton method (detection path).
+--   * RSWorldMapButtonMixin (the world-map button mixin) -- its NotifyUpdate
+--     method body only references file-local RSMinimap / RSProvider upvalues,
+--     not `self`, so we can invoke it from outside the addon: it triggers
+--     the same RSMinimap.RefreshAllData + RSProvider.RefreshAllDataProviders
+--     pair RareScanner uses for its dropdown.
+do
+  local function DoRefresh()
+    if not WorldMapFrame:IsShown() then return end
+    if RSWorldMapButtonMixin and RSWorldMapButtonMixin.NotifyUpdate then
+      RSWorldMapButtonMixin.NotifyUpdate(nil)
+    end
+  end
+
+  -- Deferred variant for the detection path (case (b)): ShowAlert in
+  -- RSButtonHandler.lua calls button:ShowButton() at line 494 but only calls
+  -- RSRecentlySeenTracker.AddRecentlySeen at line 524 -- so a synchronous
+  -- post-hook on ShowButton would rebuild POIs BEFORE the entity is marked
+  -- recently-seen, and the pin texture wouldn't pick up the PINK_*_TEXTURE
+  -- "recently seen" variant. C_Timer.After(0, ...) defers to next frame, by
+  -- which time AddRecentlySeen has populated recently_seen_entities.
+  local function DoRefreshDeferred()
+    C_Timer.After(0, DoRefresh)
+  end
+
+  local rsHookFrame = CreateFrame("Frame")
+  rsHookFrame:RegisterEvent("PLAYER_LOGIN")
+  rsHookFrame:SetScript("OnEvent", function(self)
+    self:UnregisterAllEvents()
+    local scanner = _G.RARESCANNER_BUTTON
+    if not scanner then return end -- RareScanner not installed; nothing to hook.
+
+    -- (a) Filter buttons. Refresh synchronously: post-hooks fire after the
+    -- original OnClick body returns, by which time RSConfigDB.SetXxxFiltered
+    -- has committed (same pattern RareScanner's pin Shift+Alt+click uses --
+    -- see RSEntityPinMixin.lua:81).
+    local function HookFilterButton(button)
+      if button and not button.pwm_filter_hooked then
+        button.pwm_filter_hooked = true
+        button:HookScript("OnClick", DoRefresh)
+      end
+    end
+    HookFilterButton(scanner.FilterEntityButton)
+    HookFilterButton(scanner.UnFilterEntityButton)
+
+    -- (b) Detection. hooksecurefunc (not HookScript("OnShow")) because the
+    -- popup may already be visible from a previous detection -- the new
+    -- ShowButton call updates its content without firing OnShow. We want
+    -- to catch every detection.
+    if scanner.ShowButton then
+      hooksecurefunc(scanner, "ShowButton", DoRefreshDeferred)
+    end
+  end)
+end
 
 
 
