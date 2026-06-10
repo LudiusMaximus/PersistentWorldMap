@@ -5,5 +5,5 @@
   <Script file="Libs\LibStub\LibStub.lua"/>
 
   <!--Libraries-->
-  <Include file="Libs\Krowi_WorldMapButtons\Krowi_WorldMapButtons-1.4.xml"/>
+  <Include file="Libs\Krowi_WorldMapButtons\Krowi_WorldMapButtons.xml"/>
 </Ui>

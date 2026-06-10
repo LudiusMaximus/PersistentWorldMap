@@ -390,7 +390,7 @@ end)
 -- RareScanner integration: refresh RareScanner's map pins after events that
 -- change pin state without triggering a world-map refresh.
 --
--- Two such events exist:
+-- Three such events exist:
 --
 -- (a) FILTER CHANGE via the scanner popup's two buttons. The popup (the
 --     global RARESCANNER_BUTTON frame) has a FilterEntityButton (adds to
@@ -417,6 +417,27 @@ end)
 --     scanner_button:ShowButton() surfaces the popup; that method is the
 --     closest reliably-hookable point to the detection.
 --
+-- (c) DRAGON GLYPH COLLECTION. RareScanner shows pins for uncollected
+--     Skyriding/Dragonriding glyphs (see Core/Service/POI/RSDragonGlyphPOI.lua
+--     :44 -- GetDragonGlyphPOIs filters out collected glyphs via
+--     RSDragonGlyphDB.isDragonGlyphCollected). It marks a glyph collected
+--     from two event paths in Core/Service/RSEventHandler.lua:
+--       * ACHIEVEMENT_EARNED -> OnAchievementEarned (lines 510-516) when
+--         the achievement itself is the glyph (synchronous).
+--       * CRITERIA_EARNED -> OnCriteriaEarned -> OnAchievementCriteriaEarned
+--         (lines 518-566) when the glyph is a CRITERIA of a parent zone
+--         achievement. This path uses C_Timer.After(0.2, ...) to wait for
+--         the achievement system to update.
+--     Both call RSDragonGlyphDB.SetDragonGlyphCollected + RSMinimap.HideIcon
+--     -- updating the minimap and database but NOT the world map. We listen
+--     for the same events and refresh ~0.3s later (longer than RareScanner's
+--     0.2s internal wait, so the DB is already updated by the time we
+--     rebuild). Per-event filtering would require access to
+--     RSDragonGlyphDB.IsDragonGlyph which is private, but NotifyUpdate is
+--     cheap and the events are infrequent (achievements during play), so we
+--     just refresh on every CRITERIA_EARNED / ACHIEVEMENT_EARNED when the
+--     map is shown.
+--
 -- (Other filter-change entry points already refresh on their own:
 -- RareScanner's world-map dropdown button does it via
 -- RSWorldMapButtonMixin:NotifyUpdate -> RSProvider.RefreshAllDataProviders.
@@ -430,10 +451,11 @@ end)
 -- doesn't touch (see RareScanner/Core/Libs/RSProvider.lua and
 -- /Core/Plugins/MapPlugin/MapCanvas/RSWorldMap.lua).
 --
--- We also can't hooksecurefunc RSConfigDB.SetXxxFiltered or
--- RSRecentlySeenTracker.AddRecentlySeen directly -- both live in RareScanner's
--- private addon namespace and aren't globals. But two things ARE global and
--- reachable:
+-- We also can't hooksecurefunc RSConfigDB.SetXxxFiltered,
+-- RSRecentlySeenTracker.AddRecentlySeen, or RSDragonGlyphDB.SetDragonGlyph-
+-- Collected directly -- they all live in RareScanner's private addon
+-- namespace (private.libs in Core/RSAddon.lua, no LibStub registration).
+-- But two things ARE global and reachable:
 --   * RARESCANNER_BUTTON (the scanner popup frame) and its child buttons --
 --     hookable via HookScript on OnClick (filter buttons) and
 --     hooksecurefunc on its :ShowButton method (detection path).
@@ -461,32 +483,53 @@ do
     C_Timer.After(0, DoRefresh)
   end
 
+  -- Deferred variant for the dragon-glyph path (case (c)): RareScanner's
+  -- OnAchievementCriteriaEarned wraps its DB write in C_Timer.After(0.2, ...)
+  -- (RSEventHandler.lua:520). We must defer past that or NotifyUpdate would
+  -- rebuild POIs from a DB that hasn't yet marked the glyph collected, and
+  -- the pin would persist until the next refresh. 0.3s gives a 100ms cushion.
+  local function DoRefreshAfterRSGlyphHandler()
+    C_Timer.After(0.3, DoRefresh)
+  end
+
   local rsHookFrame = CreateFrame("Frame")
   rsHookFrame:RegisterEvent("PLAYER_LOGIN")
-  rsHookFrame:SetScript("OnEvent", function(self)
-    self:UnregisterAllEvents()
-    local scanner = _G.RARESCANNER_BUTTON
-    if not scanner then return end -- RareScanner not installed; nothing to hook.
+  rsHookFrame:SetScript("OnEvent", function(self, event, ...)
+    if event == "PLAYER_LOGIN" then
+      self:UnregisterEvent("PLAYER_LOGIN")
+      local scanner = _G.RARESCANNER_BUTTON
+      if not scanner then return end -- RareScanner not installed; nothing to hook.
 
-    -- (a) Filter buttons. Refresh synchronously: post-hooks fire after the
-    -- original OnClick body returns, by which time RSConfigDB.SetXxxFiltered
-    -- has committed (same pattern RareScanner's pin Shift+Alt+click uses --
-    -- see RSEntityPinMixin.lua:81).
-    local function HookFilterButton(button)
-      if button and not button.pwm_filter_hooked then
-        button.pwm_filter_hooked = true
-        button:HookScript("OnClick", DoRefresh)
+      -- (a) Filter buttons. Refresh synchronously: post-hooks fire after the
+      -- original OnClick body returns, by which time RSConfigDB.SetXxxFiltered
+      -- has committed (same pattern RareScanner's pin Shift+Alt+click uses --
+      -- see RSEntityPinMixin.lua:81).
+      local function HookFilterButton(button)
+        if button and not button.pwm_filter_hooked then
+          button.pwm_filter_hooked = true
+          button:HookScript("OnClick", DoRefresh)
+        end
       end
-    end
-    HookFilterButton(scanner.FilterEntityButton)
-    HookFilterButton(scanner.UnFilterEntityButton)
+      HookFilterButton(scanner.FilterEntityButton)
+      HookFilterButton(scanner.UnFilterEntityButton)
 
-    -- (b) Detection. hooksecurefunc (not HookScript("OnShow")) because the
-    -- popup may already be visible from a previous detection -- the new
-    -- ShowButton call updates its content without firing OnShow. We want
-    -- to catch every detection.
-    if scanner.ShowButton then
-      hooksecurefunc(scanner, "ShowButton", DoRefreshDeferred)
+      -- (b) Detection. hooksecurefunc (not HookScript("OnShow")) because the
+      -- popup may already be visible from a previous detection -- the new
+      -- ShowButton call updates its content without firing OnShow. We want
+      -- to catch every detection.
+      if scanner.ShowButton then
+        hooksecurefunc(scanner, "ShowButton", DoRefreshDeferred)
+      end
+
+      -- (c) Dragon glyph collection. Both events can mark a glyph collected
+      -- in RareScanner. Register only after we've confirmed RareScanner is
+      -- installed; otherwise no point waking the frame.
+      self:RegisterEvent("CRITERIA_EARNED")
+      self:RegisterEvent("ACHIEVEMENT_EARNED")
+
+    elseif event == "CRITERIA_EARNED" or event == "ACHIEVEMENT_EARNED" then
+      -- (c) Refresh after RareScanner's 0.2s timer has updated the glyph DB.
+      DoRefreshAfterRSGlyphHandler()
     end
   end)
 end

@@ -205,13 +205,25 @@ end
 -- ==  can edit the parent mixin. Per-instance replacement (driven by the    ==
 -- ==  pool-acquire hook in section 6) is mixin-chain-agnostic.              ==
 -- ==                                                                        ==
--- ==  Why pin.OnMouseEnter = X (field replacement) instead of               ==
--- ==  pin:SetScript("OnEnter", X): MapCanvasMixin:AcquirePin runs           ==
+-- ==  How OnMouseEnter / OnMouseLeave get installed (two paths):            ==
+-- ==                                                                        ==
+-- ==  Fresh pins (newPin == true): we set pin.OnMouseEnter as a TABLE       ==
+-- ==  FIELD only. Blizzard's MapCanvasMixin:AcquirePin then runs            ==
 -- ==  `assert(pin:GetScript("OnEnter") == nil)` at Blizzard_MapCanvas.lua   ==
--- ==  :280, AFTER our pool wrapper returns. SetScript-ing inside our        ==
--- ==  wrapper trips that assertion. By replacing the mixin-copied method    ==
--- ==  fields while OnEnter/OnLeave scripts are still unbound, Blizzard's    ==
--- ==  own subsequent SetScript at lines 283-284 picks up our functions.    ==
+-- ==  :280 (inside `if newPin then`) and binds the field as the script at   ==
+-- ==  :283-284. Calling SetScript ourselves on a new pin would trip the     ==
+-- ==  assert, so we must not.                                               ==
+-- ==                                                                        ==
+-- ==  Reused pins (newPin == false): Blizzard SKIPS the :262-289 SetScript  ==
+-- ==  block entirely; whatever OnEnter/OnLeave scripts were bound at the    ==
+-- ==  pin's first creation persist. If that first creation happened before  ==
+-- ==  our pool wrapper was installed (e.g. another addon triggered an       ==
+-- ==  AcquirePin during load before us), the original Blizzard handler is   ==
+-- ==  permanently bound and table-field replacement alone has no effect --  ==
+-- ==  the secret-number trap fires on every hover. Detect that case (first  ==
+-- ==  time we see this pin AND newPin is false) in the pool wrapper and     ==
+-- ==  rebind via SetScript explicitly. The :280 assert is inside `if newPin ==
+-- ==  then` and does not fire on the reuse path, so SetScript is safe.      ==
 -- ==                                                                        ==
 -- ==  +---------------------------------------------------------------+    ==
 -- ==  |  MAINTENANCE WARNING -- READ BEFORE EVERY RETAIL PATCH        |    ==
@@ -224,7 +236,7 @@ end
 -- ==  PWM copy here and mirror any change. If you skip this audit,          ==
 -- ==  tooltip content silently diverges from Blizzard's intent.             ==
 -- ==                                                                        ==
--- ==  AUDIT CHECKLIST  (last audited: 2026-06-05 vs Midnight 12.0.5)        ==
+-- ==  AUDIT CHECKLIST  (last audited: 2026-06-08 vs Midnight 12.0.5)        ==
 -- ==                                                                        ==
 -- ==    Blizzard_FrameXMLUtil/AreaPoiUtil.lua                               ==
 -- ==        AreaPoiUtil.TryShowTooltip                lines 3-72            ==
@@ -238,6 +250,19 @@ end
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/AreaPOIDataProvider.lua             ==
 -- ==        AreaPOIPinMixin:OnMouseEnter              lines 159-181         ==
+-- ==        (AreaPOIEventPinMixin, DelveEntrancePinMixin, QuestHubPin-      ==
+-- ==         GlowMixin all inherit/delegate to AreaPOIPinMixin:OnMouseEnter ==
+-- ==         -- see file pointers under their own dispatch branches.)       ==
+-- ==                                                                        ==
+-- ==    Blizzard_SharedMapDataProviders/DelveEntranceDataProvider.lua       ==
+-- ==        DelveEntrancePinMixin = AreaPOIPinMixin:CreateSubPin(...) :42   ==
+-- ==        (snapshot-copies AreaPOIPinMixin's OnMouseEnter at Blizzard     ==
+-- ==         load; no DelveEntrance-specific OnMouseEnter to mirror.)       ==
+-- ==                                                                        ==
+-- ==    Blizzard_SharedMapDataProviders/QuestOfferDataProvider.lua          ==
+-- ==        QuestHubPinGlowMixin:OnMouseEnter         lines 869-872         ==
+-- ==        (calls AreaPOIPinMixin.OnMouseEnter(self) + self:AcknowledgeGlow ==
+-- ==         -- our dispatch branch preserves the AcknowledgeGlow call.)    ==
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/WorldQuestDataProvider.lua          ==
 -- ==        WorldQuestPinMixin:OnMouseEnter           lines 420-424         ==
@@ -280,6 +305,36 @@ end
 -- ==                                                                        ==
 -- ==  When you update the audit date above, also update the per-function    ==
 -- ==  "Source lines" comments inline below if any line ranges shifted.      ==
+-- ==                                                                        ==
+-- ==  HOW TO RE-AUDIT FOR NEWLY ADDED PIN TEMPLATES                         ==
+-- ==                                                                        ==
+-- ==  Greps for risky-builder CALL SITES alone misses templates that        ==
+-- ==  reach those builders by inheritance / delegation rather than by a     ==
+-- ==  literal call in their own .lua file. Three queries together cover    ==
+-- ==  the full surface (run all three against the Blizzard_SharedMap-      ==
+-- ==  DataProviders folder, and check the FlightMap/QuestMap folders too): ==
+-- ==                                                                        ==
+-- ==  (1) Direct calls to risky tooltip builders                            ==
+-- ==      pattern: TaskPOI_OnEnter | AreaPoiUtil.TryShowTooltip            ==
+-- ==             | GameTooltip_AddWidgetSet | GameTooltip_AddQuestRewards- ==
+-- ==             ToTooltip | EmbeddedItemTooltip_ | SetTooltipMoney        ==
+-- ==                                                                        ==
+-- ==  (2) Templates inheriting OnMouseEnter from a covered template via    ==
+-- ==      XML or via CreateSubPin / CreateFromMixins:                       ==
+-- ==      pattern: CreateSubPin | inherits=".*PinTemplate"                  ==
+-- ==      Then cross-reference each hit against the covered mixins above.   ==
+-- ==                                                                        ==
+-- ==  (3) Templates that delegate to a covered OnMouseEnter via a live     ==
+-- ==      table lookup inside their own OnMouseEnter body:                  ==
+-- ==      pattern: \.OnMouseEnter\(self\)                                   ==
+-- ==      Cross-reference the target mixin against the covered list.        ==
+-- ==                                                                        ==
+-- ==  Negative-result reference: BaseMapPoiPinMixin:OnMouseEnter (Shared-   ==
+-- ==  MapPoiTemplates.lua:163) calls only CheckShowTooltip, which uses     ==
+-- ==  GameTooltip_SetTitle / AddNormalLine / AddInstructionLine -- pure    ==
+-- ==  text, no measured widgets, no secret-number trap. So every template ==
+-- ==  whose only OnMouseEnter source is BaseMapPoiPinMixin:CreateSubPin    ==
+-- ==  is safe to skip.                                                      ==
 -- ==                                                                        ==
 -- ============================================================================
 -- ============================================================================
@@ -609,10 +664,22 @@ end
 --   * self:TryShowTooltip()  ->  PWM_AreaPoiUtil_TryShowTooltip(self, ...)
 --   * self.UpdateTooltip points at OUR handler so timer-driven refreshes
 --     also use PWMTooltip.
--- AreaPOIEventPinTemplate also routes through this handler -- its mixin's
--- OnMouseEnter delegates to AreaPOIPinMixin.OnMouseEnter(self) as a live
--- table lookup, and the per-instance replacement we do at acquire time
--- catches it for both pin templates.
+-- This handler also serves the templates whose OnMouseEnter is (or
+-- delegates to) AreaPOIPinMixin's. Per-instance replacement catches them
+-- all because we install on pin.OnMouseEnter directly:
+--   * AreaPOIPinTemplate                 -- direct match
+--   * AreaPOIEventPinTemplate            -- mixin delegates via live lookup
+--                                          (AreaPOIEventDataProvider.lua:76)
+--   * DelveEntrancePinTemplate           -- AreaPOIPinMixin:CreateSubPin
+--                                          (DelveEntranceDataProvider.lua:42)
+--   * QuestHubPinTemplate                -- XML inherits AreaPOIPinTemplate;
+--                                          its mixin's OnMouseEnter delegates
+--                                          to AreaPOIPinMixin.OnMouseEnter
+--                                          (QuestOfferDataProvider.lua:869-872)
+--                                          and additionally calls
+--                                          self:AcknowledgeGlow() -- preserved
+--                                          by the QuestHub branch in
+--                                          PatchPinForCustomTooltip below.
 -- ----------------------------------------------------------------------------
 local function PWM_AreaPOIPin_OnMouseEnter(self)
   DebugLog("AreaPOI hover: areaPoiID=%s pinTemplate=%s",
@@ -924,13 +991,13 @@ end
 -- (threaded down because pin.pinTemplate isn't assigned yet at our call
 -- site -- AcquirePin sets it AFTER pool:Acquire returns).
 --
--- We replace pin.OnMouseEnter / pin.OnMouseLeave as TABLE FIELDS, NOT via
--- pin:SetScript. Blizzard's MapCanvasMixin:AcquirePin runs
--- `assert(pin:GetScript("OnEnter") == nil)` at Blizzard_MapCanvas.lua:280
--- after our wrapper returns; SetScript-ing inside the wrapper trips that
--- assertion. Replacing the mixin-copied methods while OnEnter/OnLeave
--- scripts are still unbound lets Blizzard's own SetScript at lines 283-284
--- bind our functions for us.
+-- This function ONLY updates the OnMouseEnter / OnMouseLeave TABLE FIELDS.
+-- The script-binding side is handled by the caller in section (6) because
+-- it differs between fresh and reused pins: on a fresh pin Blizzard binds
+-- the script for us at Blizzard_MapCanvas.lua:283-284 (so we must NOT
+-- SetScript here -- the :280 assert would trip); on a reused pin Blizzard
+-- skips that block entirely and the caller does an explicit SetScript.
+-- See the section (5) banner above for the full reasoning.
 local function PatchPinForCustomTooltip(pin, pinTemplate)
   if pin.pwm_custom_tooltip_patched then return end
   pin.pwm_custom_tooltip_patched = true
@@ -943,12 +1010,34 @@ local function PatchPinForCustomTooltip(pin, pinTemplate)
     pin.OnMouseEnter = PWM_WorldQuestPin_OnMouseEnter
     pin.OnMouseLeave = PWM_WorldQuestPin_OnMouseLeave
 
-  elseif pinTemplate == "AreaPOIPinTemplate" or pinTemplate == "AreaPOIEventPinTemplate" then
-    -- Capture THIS pin's mixin-copied OnMouseLeave (Blizzard's original)
-    -- so our wrapper can forward the map TriggerEvents in it. Using the
-    -- per-instance copy is mixin-chain-agnostic across the AreaPOI variants.
+  elseif pinTemplate == "AreaPOIPinTemplate"
+      or pinTemplate == "AreaPOIEventPinTemplate"
+      or pinTemplate == "DelveEntrancePinTemplate" then
+    -- All three share the AreaPOIPinMixin OnMouseEnter (directly, via live
+    -- table-lookup delegation, or via CreateSubPin snapshot copy -- see the
+    -- comment above PWM_AreaPOIPin_OnMouseEnter). Capture THIS pin's mixin-
+    -- copied OnMouseLeave (Blizzard's original) so our wrapper can forward
+    -- the map TriggerEvents in it. Using the per-instance copy is mixin-
+    -- chain-agnostic.
     local origLeave = pin.OnMouseLeave
     pin.OnMouseEnter = PWM_AreaPOIPin_OnMouseEnter
+    pin.OnMouseLeave = function(self, ...)
+      PWMTooltip:Hide()
+      if origLeave then return origLeave(self, ...) end
+    end
+
+  elseif pinTemplate == "QuestHubPinTemplate" then
+    -- QuestHubPinTemplate's mixin (QuestHubPinGlowMixin:OnMouseEnter at
+    -- QuestOfferDataProvider.lua:869-872) calls AreaPOIPinMixin.OnMouseEnter
+    -- AND then self:AcknowledgeGlow(). If we just installed
+    -- PWM_AreaPOIPin_OnMouseEnter we'd lose the AcknowledgeGlow call, so we
+    -- wrap to preserve it. AcknowledgeGlow is on the pin instance via the
+    -- glow mixin; guard with a nil-check in case future patches remove it.
+    local origLeave = pin.OnMouseLeave
+    pin.OnMouseEnter = function(self, ...)
+      PWM_AreaPOIPin_OnMouseEnter(self)
+      if self.AcknowledgeGlow then self:AcknowledgeGlow() end
+    end
     pin.OnMouseLeave = function(self, ...)
       PWMTooltip:Hide()
       if origLeave then return origLeave(self, ...) end
@@ -1010,8 +1099,19 @@ end
 -- Reading pin.pinTemplate inside our wrapper would yield nil.
 --
 -- A __newindex metatable on WorldMapFrame.pinPools catches future pool
--- creation. Patches are on the pin INSTANCE, so they survive pool recycling
--- across map opens.
+-- creation; existing pools at our load time are wrapped in a one-shot loop.
+-- Patches are on the pin INSTANCE, so they survive pool recycling across
+-- map opens.
+--
+-- The wrapper handles two cases:
+--   * Fresh pin (isNew == true): set pin.OnMouseEnter / .OnMouseLeave as
+--     table fields only; Blizzard's AcquirePin then SetScripts them for us.
+--   * Reused pin (isNew == false) seen for the first time: set the table
+--     fields AND explicitly SetScript. Without the second step, the OnEnter
+--     binding from the pin's original creation (potentially before our
+--     wrapper was installed, with Blizzard's original tooltip-trap-prone
+--     handler) would persist forever. See section (5) banner for the full
+--     reasoning behind the two paths.
 --
 do
   local function PatchPin(pin, pinTemplate)
@@ -1040,8 +1140,28 @@ do
     local origAcquire = pool.Acquire
     pool.Acquire = function(self, ...)
       local pin, isNew = origAcquire(self, ...)
-      if pin and isNew then
+      if pin then
+        -- For isNew==true, Blizzard's AcquirePin will SetScript("OnEnter",
+        -- pin.OnMouseEnter) at Blizzard_MapCanvas.lua:283 immediately after
+        -- we return -- so updating the table field is enough; Blizzard picks
+        -- up our function. We must NOT call SetScript ourselves on a new
+        -- pin: the assert at :280 (still inside `if newPin then`) would trip.
+        --
+        -- For isNew==false (reused pin), Blizzard SKIPS the SetScript block
+        -- entirely -- the pin keeps whatever OnEnter/OnLeave scripts were
+        -- bound at its original creation. If that original creation happened
+        -- before our wrapper was installed (e.g. another addon triggered an
+        -- AcquirePin during load before us), the binding points at the
+        -- ORIGINAL Blizzard handler forever, regardless of how many times we
+        -- overwrite the table field. Detect that case (we've never patched
+        -- this pin before) and rebind explicitly. The :280 assert is inside
+        -- `if newPin then` and does not fire on reuse, so this is safe.
+        local needsScriptRebind = (not isNew) and (not pin.pwm_custom_tooltip_patched)
         PatchPin(pin, pinTemplate)
+        if needsScriptRebind then
+          pin:SetScript("OnEnter", pin.OnMouseEnter)
+          pin:SetScript("OnLeave", pin.OnMouseLeave)
+        end
       end
       return pin, isNew
     end
