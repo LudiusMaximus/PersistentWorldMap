@@ -19,13 +19,19 @@ local folderName, Addon = ...
 --        Add a "Reload UI" button so we can offer a graceful recovery from
 --        a residual taint trip without forcing the user to disable PWM.
 --
---    (2) PerformEmote / CancelEmote guards
---        In PvP instances, the WorldMap "READ" emote becomes a protected
---        call and trips ADDON_ACTION_FORBIDDEN once mapID is tainted.
---        Wrap the two API functions to skip the emote in PvP.
+--    (2) PvP-instance OnShow replacement to skip the READ emote
+--        On entering a PvP instance, SetScript WorldMapFrame:OnShow to a
+--        manually-inlined copy of WorldMapMixin:OnShow with the
+--        C_ChatInfo.PerformEmote("READ", ...) line at Blizzard_WorldMap.
+--        lua:352 omitted. On leaving, restore the raw Blizzard handler.
+--        This has a patch-day maintenance cost -- diff Blizzard's OnShow
+--        against the local copy every retail patch. Also installs the
+--        reading-emote opt-out HookScript (formerly section (3)).
 --
---    (3) Reading-emote opt-out
---        OnShow hook that cancels the emote when the user has disabled it.
+--    (3) [reserved] -- see section (2)
+--        The reading-emote opt-out HookScript that used to live here moved
+--        into section (2) so its lifecycle stays tied to (2)'s SetScript /
+--        restore cycle. Numbering preserved to keep (4)-(10) stable.
 --
 --    (4) Combat-end refresh
 --        Declares Addon.reloadAfterCombat (set by section 5's protected-call
@@ -61,6 +67,117 @@ local folderName, Addon = ...
 --    (10) PLAYER_LOGIN startup
 --         Preload EncounterJournal, fix initial frame anchors, register
 --         UISpecialFrames, install the mutual-exclusion HookScripts.
+--
+-- ============================================================================
+-- ============================================================================
+--
+--
+-- ============================================================================
+-- ============================================================================
+-- ==                                                                        ==
+-- ==   PATCH-DAY MAINTENANCE MANUAL                                         ==
+-- ==   Read this on EVERY retail patch before shipping a compatible build.  ==
+-- ==                                                                        ==
+-- ============================================================================
+-- ============================================================================
+--
+-- Three separate audits, each with its own last-synced date recorded inline.
+-- Skipping any of them lets a Blizzard change silently break PWM: either the
+-- taint dam fails and errors surface, or our copy of Blizzard code diverges
+-- from the current behavior and features silently regress.
+--
+-- ----------------------------------------------------------------------------
+-- AUDIT (A) -- Section (2)'s PvPOnShow copy of WorldMapMixin:OnShow
+-- ----------------------------------------------------------------------------
+--
+--   Blizzard source:  Blizzard_WorldMap/Blizzard_WorldMap.lua
+--   Blizzard symbol:  WorldMapMixin:OnShow           (lines 335-368 as of 12.0.5)
+--   Our copy:         local function PvPOnShow(self) in section (2) below.
+--   Deviation:        omit the C_ChatInfo.PerformEmote("READ", nil, true)
+--                     call at line :352. Every other line must match.
+--
+--   Procedure:
+--     1. Open the Blizzard source at the cited symbol.
+--     2. Diff line-by-line against PvPOnShow.
+--     3. Mirror ANY change (added line, reordered call, new local, ...).
+--     4. Keep the omitted-line comment where the PerformEmote call would be.
+--     5. Update the "Last synced" date in PvPOnShow's header comment
+--        AND in the section (2) banner's MAINTENANCE note.
+--
+--   Symptoms of a stale copy:
+--     * BG map open error resurfaces (Blizzard moved the emote to a
+--       different line and our copy still runs the old version).
+--     * Missing UI behaviors in BG map open (Blizzard added a line we
+--       don't replicate: minimap sync, side panel state, etc.).
+--
+-- ----------------------------------------------------------------------------
+-- AUDIT (B) -- Section (5)'s Blizzard-source tooltip-builder copies
+-- ----------------------------------------------------------------------------
+--
+--   Blizzard sources (multiple files -- see the audit checklist banner
+--   inside section (5) for the exact list of functions, files, and line
+--   ranges).
+--   Our copies:      the PWM_* functions inside the "BLIZZARD-SOURCE COPIES"
+--                    block of section (5). Each one has its own inline
+--                    "COPY OF" / "Source lines" / "Adaptation" header.
+--   Deviation:       every reference to the canonical `GameTooltip` global
+--                    rewritten to a local `tooltip = PWMTooltip` binding.
+--                    Everything else must match.
+--
+--   Procedure:
+--     1. Open each cited Blizzard source at the cited function.
+--     2. Diff line-by-line against the PWM copy.
+--     3. Mirror ANY change; keep the GameTooltip -> PWMTooltip rewrite.
+--     4. Update the "Source lines" line-range in each COPY OF header if
+--        Blizzard shifted things.
+--     5. Update the "AUDIT CHECKLIST" date in section (5)'s banner.
+--
+--   Symptoms of a stale copy:
+--     * Wrong / missing tooltip content on world map pin hover (fields
+--       added by Blizzard we don't render, format changes we don't mirror,
+--       etc.).
+--     * Silent tooltip errors under PWM taint that the canonical Blizzard
+--       code would have handled.
+--
+-- ----------------------------------------------------------------------------
+-- AUDIT (C) -- Section (5)'s pin-template dispatch coverage
+-- ----------------------------------------------------------------------------
+--
+--   Blizzard sources: Blizzard_SharedMapDataProviders/, Blizzard_WorldMap/,
+--                     Blizzard_FlightMap/, Blizzard_AnimaDiversionUI/,
+--                     Blizzard_BattlefieldMap/ -- any addon that adds a
+--                     data provider to a map canvas.
+--   Our coverage:     the pinTemplate branches in PatchPinForCustomTooltip
+--                     (section (5)) and the canvas hooks in section (6).
+--
+--   Procedure:
+--     Run the four greps documented in the "HOW TO RE-AUDIT" block inside
+--     section (5)'s banner. Cross-reference each hit against the covered
+--     mixins / templates. Add any newly-created derivatives to the
+--     appropriate dispatch branch. Update the audit-checklist date and
+--     the per-function line ranges in section (5)'s banner.
+--
+--   Symptoms of a stale audit:
+--     * "attempt to perform arithmetic on a secret number value" errors
+--       on hover of a specific pin type that isn't in our dispatch.
+--     * Silent PWM-taint blame on tooltip functions the trap widened to
+--       cover after our previous audit.
+--
+-- ----------------------------------------------------------------------------
+-- Not part of the retail-patch cadence but worth re-checking when Blizzard
+-- ships significant UI infrastructure changes:
+--
+--   * Blizzard_MapCanvas/Blizzard_MapCanvas.lua -- AcquirePin at :251,
+--     particularly the OnEnter/OnLeave nil-assertion + SetScript block at
+--     :262-289. Section (6)'s WrapPoolAcquire relies on these line numbers
+--     being correct for its "fresh vs reused pin" branching.
+--
+--   * Blizzard_GameTooltip/Mainline/GameTooltip.xml -- the ItemTooltip
+--     child of the canonical GameTooltip (lines 249-274 as of 12.0.5).
+--     Section (5)'s PWMTooltip manually creates an
+--     InternalEmbeddedItemTooltipTemplate child to mirror this; if
+--     Blizzard restructures the tooltip template composition, the manual
+--     child creation may need to change.
 --
 -- ============================================================================
 -- ============================================================================
@@ -104,51 +221,161 @@ end
 
 
 -- ============================================================================
--- (2) Prevent PerformEmote/CancelEmote taint in PvP instances
+-- (2) PvP-instance OnShow replacement to skip the READ emote
 -- ============================================================================
 --
--- WorldMapMixin:OnShow calls C_ChatInfo.PerformEmote("READ", nil, true) and
--- :OnHide calls C_ChatInfo.CancelEmote(). Both are protected in PvP
--- instances. Because our addon taints WorldMapFrame.mapID, Blizzard's OnShow
--- reads the tainted value and the call to PerformEmote runs in insecure
--- execution -- triggering ADDON_ACTION_FORBIDDEN in PvP.
+-- HISTORICAL CONTEXT (do NOT reintroduce these approaches):
 --
--- Fix: wrap both API functions to skip the "READ" emote in PvP instances.
--- We avoid SetScript on OnShow itself because that would make all of OnShow
--- addon-originated, causing MoneyFrame "secret number" errors downstream.
+--   b5af17d, 20ab7b1, 16afd8f: wrapped C_ChatInfo.PerformEmote /
+--   .CancelEmote to filter the READ emote in PvP. The wrapper WRITE from
+--   tainted addon-load context permanently tainted the FIELD ENTRY on
+--   C_ChatInfo.PerformEmote for the session; every subsequent secure read
+--   (any /sorry, /wave, etc. typed by the user) inherited PWM taint and
+--   blamed us for ADDON_ACTION_BLOCKED once Blizzard tightened a
+--   downstream C protection in raid boss fights. Same trap the section
+--   (5) banner spells out for _G.GameTooltip: writes to a globally-
+--   visible function field from tainted execution taint the field entry
+--   permanently.
+--
+--   Direct field WRITES to C_ChatInfo.* are OFF LIMITS, forever.
+--
+-- CURRENT APPROACH:
+--
+-- The PvP error stems from OnShow's `C_ChatInfo.PerformEmote("READ", ...)`
+-- at Blizzard_WorldMap.lua:352 reaching a protected C downstream when
+-- OnShow's execution has any PWM taint. Since PWM-taint on WorldMapFrame
+-- .mapID is inevitable during normal use (writing to mapID is PWM's
+-- reason to exist), we must stop the emote line from being called at all
+-- while in PvP.
+--
+--   * On entering a PvP instance (PLAYER_ENTERING_WORLD), SetScript
+--     WorldMapFrame's OnShow to PvPOnShow: a MANUALLY-INLINED copy of
+--     Blizzard's WorldMapMixin:OnShow (Blizzard_WorldMap.lua:335-368)
+--     with the C_ChatInfo.PerformEmote line at :352 omitted. The emote
+--     never fires while in PvP, so no protected downstream is reached.
+--   * On leaving a PvP instance, SetScript back to the raw Blizzard
+--     handler captured at addon load, and re-add the reading-emote-opt-
+--     out HookScript that SetScript wipes.
+--
+-- Why not always SetScript (both in and out of PvP): our wrapper's
+-- execution is PWM-tainted (we're addon-defined). When Blizzard's OnShow
+-- code runs UNDER that taint, downstream MoneyFrame widgets and other
+-- tooltip machinery inherit taint and emit "secret number" arithmetic
+-- errors on the map's own header. Empirically observed on 2026-04-01
+-- (commit 20ab7b1 moved away from SetScript for exactly this reason).
+-- By SetScript'ing only in PvP and reverting on exit, outside PvP OnShow
+-- runs on Blizzard's raw handler with no PWM taint at all.
+--
+-- MAINTENANCE: see the PATCH-DAY MAINTENANCE MANUAL at the top of this
+-- file (Audit (A)). "Last synced" date lives inline in the PvPOnShow copy
+-- below and is the single source of truth.
+--
+-- OTHER-ADDON HOOKS: SetScript wipes any HookScript-wrappers on the
+-- frame. When we SetScript to PvPOnShow, hooks from other addons stop
+-- firing until we restore. On restore we re-add PWM's own reading-emote
+-- HookScript; we cannot restore third-party hooks automatically. Given
+-- that most addons HookScript at load time (before any PvP entry), this
+-- is only a real issue if the user /reloads DURING a PvP session, in
+-- which case freshly-loaded hooks get wiped on next PvP exit.
 --
 do
   local function IsInPvPInstance()
-    local isInstance, instanceType = IsInInstance()
-    return isInstance and instanceType == "pvp"
+    local _, instanceType = IsInInstance()
+    return instanceType == "pvp"
   end
 
-  local origPerformEmote = C_ChatInfo.PerformEmote
-  C_ChatInfo.PerformEmote = function(emote, ...)
-    if IsInPvPInstance() and emote == "READ" then return end
-    return origPerformEmote(emote, ...)
+  -- Capture Blizzard's raw OnShow BEFORE anything else HookScripts it.
+  local origOnShowHandler = WorldMapFrame:GetScript("OnShow")
+
+  -- ------------------------------------------------------------------------
+  -- MANUAL COPY of WorldMapMixin:OnShow (Blizzard_WorldMap.lua:335-368).
+  -- Last synced 2026-06-10 vs Midnight 12.0.5. See PATCH-DAY MANUAL,
+  -- Audit (A) at top of file for the sync procedure.
+  -- Deviation from source: the C_ChatInfo.PerformEmote("READ", nil, true)
+  -- call at line :352 is intentionally OMITTED here.
+  -- ------------------------------------------------------------------------
+  local function PvPOnShow(self)
+    if self.needUpdateDisplayState then
+      local displayState = self:GetOpenDisplayState()
+      self:SetDisplayState(displayState)
+      self.needUpdateDisplayState = nil
+    end
+
+    local frameStrata = C_GameRules.GetGameRuleAsFrameStrata(Enum.GameRule.WorldMapFrameStrata)
+    if frameStrata and frameStrata ~= "UNKNOWN" then
+      self:SetFrameStrata(frameStrata)
+    end
+
+    local mapID = MapUtil.GetDisplayableMapForPlayer()
+    self:SetMapID(mapID)
+    MapCanvasMixin.OnShow(self)
+    self:ResetZoom()
+
+    -- OMITTED: C_ChatInfo.PerformEmote("READ", nil, true) -- see section (2) header.
+    PlaySound(SOUNDKIT.IG_QUEST_LOG_OPEN)
+
+    PlayerMovementFrameFader.AddDeferredFrame(self, .5, 1.0, .5, function()
+      return GetCVarBool("mapFade") and not self:IsMouseOver()
+    end)
+    self:CheckAndShowTutorialTooltip()
+
+    local miniWorldMap = GetCVarBool("miniWorldMap")
+    local maximized = self:IsMaximized()
+    if miniWorldMap ~= maximized then
+      if miniWorldMap then
+        self.BorderFrame.MaximizeMinimizeFrame:Minimize()
+      else
+        self.BorderFrame.MaximizeMinimizeFrame:Maximize()
+      end
+    end
+
+    EventRegistry:TriggerEvent("WorldMapOnShow")
   end
 
-  local origCancelEmote = C_ChatInfo.CancelEmote
-  C_ChatInfo.CancelEmote = function(...)
-    if IsInPvPInstance() then return end
-    return origCancelEmote(...)
+  -- Reading-emote opt-out hook. Runs after Blizzard's original OnShow
+  -- outside PvP (where PerformEmote actually fires); cancels the emote if
+  -- the user has disabled it in PWM options. Cheap call, no field write.
+  local function ReadingEmoteOptOutHook(self)
+    if not PWM_config.showReadingEmote and not IsInPvPInstance() then
+      C_ChatInfo.CancelEmote()
+    end
   end
+
+  -- Initial install (we're outside PvP at addon load in the vast majority
+  -- of cases; if we happen to be inside PvP already, PLAYER_ENTERING_WORLD
+  -- fires immediately below and switches to PvPOnShow, wiping this hook).
+  WorldMapFrame:HookScript("OnShow", ReadingEmoteOptOutHook)
+
+  local pvpActive = false
+
+  local pvpTransitionFrame = CreateFrame("Frame")
+  pvpTransitionFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+  pvpTransitionFrame:SetScript("OnEvent", function()
+    if IsInPvPInstance() then
+      if not pvpActive then
+        pvpActive = true
+        WorldMapFrame:SetScript("OnShow", PvPOnShow)
+      end
+    else
+      if pvpActive then
+        pvpActive = false
+        WorldMapFrame:SetScript("OnShow", origOnShowHandler)
+        -- SetScript wiped the HookScript wrapper; re-add ours.
+        WorldMapFrame:HookScript("OnShow", ReadingEmoteOptOutHook)
+      end
+    end
+  end)
 end
 
 
 -- ============================================================================
--- (3) Reading-emote opt-out
+-- (3) [reserved] -- see section (2)
 -- ============================================================================
 --
--- Outside PvP, cancel the reading emote when the user has it disabled.
--- HookScript (not SetScript) so the OnShow handler stays Blizzard-originated.
---
-WorldMapFrame:HookScript("OnShow", function(self)
-  if not PWM_config.showReadingEmote then
-    C_ChatInfo.CancelEmote()
-  end
-end)
+-- The reading-emote opt-out that used to live here is now installed inside
+-- section (2) as ReadingEmoteOptOutHook because its lifecycle must be tied
+-- to section (2)'s SetScript / restore cycle. Numbering preserved to keep
+-- sections (4)-(10) stable.
 
 
 -- ============================================================================
@@ -236,7 +463,7 @@ end
 -- ==  PWM copy here and mirror any change. If you skip this audit,          ==
 -- ==  tooltip content silently diverges from Blizzard's intent.             ==
 -- ==                                                                        ==
--- ==  AUDIT CHECKLIST  (last audited: 2026-06-08 vs Midnight 12.0.5)        ==
+-- ==  AUDIT CHECKLIST  (last audited: 2026-06-10 vs Midnight 12.0.5)        ==
 -- ==                                                                        ==
 -- ==    Blizzard_FrameXMLUtil/AreaPoiUtil.lua                               ==
 -- ==        AreaPoiUtil.TryShowTooltip                lines 3-72            ==
@@ -253,6 +480,12 @@ end
 -- ==        (AreaPOIEventPinMixin, DelveEntrancePinMixin, QuestHubPin-      ==
 -- ==         GlowMixin all inherit/delegate to AreaPOIPinMixin:OnMouseEnter ==
 -- ==         -- see file pointers under their own dispatch branches.)       ==
+-- ==        Canvas-specific XML inheritance:                                 ==
+-- ==          Blizzard_FlightMap/FM_AreaPOIDataProvider.xml:5               ==
+-- ==            "FlightMap_AreaPOIPinTemplate" inherits AreaPOIPinTemplate  ==
+-- ==            (mixin: FlightMap_AreaPOIPinMixin =                          ==
+-- ==             CreateFromMixins(AreaPOIPinMixin), no OnMouseEnter        ==
+-- ==             override.)                                                  ==
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/DelveEntranceDataProvider.lua       ==
 -- ==        DelveEntrancePinMixin = AreaPOIPinMixin:CreateSubPin(...) :42   ==
@@ -267,6 +500,20 @@ end
 -- ==    Blizzard_SharedMapDataProviders/WorldQuestDataProvider.lua          ==
 -- ==        WorldQuestPinMixin:OnMouseEnter           lines 420-424         ==
 -- ==        WorldQuestPinMixin:OnMouseLeave           lines 426-430         ==
+-- ==        The base "WorldQuestPinTemplate" itself is virtual only --      ==
+-- ==        every canvas overrides GetPinTemplate to return a derivative:   ==
+-- ==          Blizzard_WorldMap/WM_WorldQuestDataProvider.lua:4             ==
+-- ==            -> "WorldMap_WorldQuestPinTemplate"                          ==
+-- ==            (mixin: WorldMap_WorldQuestPinMixin =                        ==
+-- ==             CreateFromMixins(WorldQuestPinMixin), no OnMouseEnter      ==
+-- ==             override -- snapshot preserves the base's tooltip path.)   ==
+-- ==          Blizzard_FlightMap/FM_WorldQuestDataProvider.lua:4            ==
+-- ==            -> "FlightMap_WorldQuestPinTemplate"                         ==
+-- ==          Blizzard_AnimaDiversionUI/AD_WorldQuestDataProvider.lua:4     ==
+-- ==            -> "AnimaDiversion_WorldQuestPinTemplate"                    ==
+-- ==        All three derivatives snapshot WorldQuestPinMixin's handlers    ==
+-- ==        verbatim; PWM's WorldQuest branch dispatches on all four        ==
+-- ==        template names.                                                 ==
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/BonusObjectiveDataProvider.lua      ==
 -- ==        BonusObjectivePinMixin:OnMouseEnter       lines 162-166         ==
@@ -288,6 +535,12 @@ end
 -- ==        VignettePinBaseMixin:DisplayNormalTooltip lines 494-514         ==
 -- ==        VignettePinBaseMixin:DisplayPvpBountyTooltip lines 516-537      ==
 -- ==        VignettePinBaseMixin:DisplayTorghastTooltip lines 539-542       ==
+-- ==        Canvas-specific XML inheritance:                                 ==
+-- ==          Blizzard_FlightMap/FM_VignetteDataProvider.xml:5              ==
+-- ==            "FlightMap_VignettePinTemplate" inherits VignettePinTemplate ==
+-- ==            (mixin: FlightMap_VignettePinMixin =                         ==
+-- ==             CreateFromMixins(VignettePinMixin), no OnMouseEnter       ==
+-- ==             override.)                                                  ==
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/QuestBlobDataProvider.lua           ==
 -- ==        QuestBlobPinMixin:UpdateTooltip           lines 182-229         ==
@@ -308,11 +561,25 @@ end
 -- ==                                                                        ==
 -- ==  HOW TO RE-AUDIT FOR NEWLY ADDED PIN TEMPLATES                         ==
 -- ==                                                                        ==
--- ==  Greps for risky-builder CALL SITES alone misses templates that        ==
--- ==  reach those builders by inheritance / delegation rather than by a     ==
--- ==  literal call in their own .lua file. Three queries together cover    ==
--- ==  the full surface (run all three against the Blizzard_SharedMap-      ==
--- ==  DataProviders folder, and check the FlightMap/QuestMap folders too): ==
+-- ==  IMPORTANT: run the queries below across ALL Blizzard_* addons that   ==
+-- ==  add data providers to a map canvas -- NOT just the "shared" folder. ==
+-- ==  Canvas-specific addons routinely OVERRIDE GetPinTemplate to return   ==
+-- ==  their own derivative template name (e.g. WorldMap_WorldQuestPin-    ==
+-- ==  Template) while snapshot-copying the base mixin's OnMouseEnter via  ==
+-- ==  CreateFromMixins -- so the base pin template is never actually     ==
+-- ==  created on that canvas, and matching only on the base template name ==
+-- ==  is a silent miss. This bit us on 2026-06-10: our WorldQuestPin-     ==
+-- ==  Template dispatch entry was never hit on WorldMapFrame because     ==
+-- ==  Blizzard uses WorldMap_WorldQuestPinTemplate there.                ==
+-- ==                                                                        ==
+-- ==  Folders to audit (retail):                                            ==
+-- ==    Blizzard_SharedMapDataProviders/  -- base mixins and shared        ==
+-- ==    Blizzard_WorldMap/                -- WM_* derivatives              ==
+-- ==    Blizzard_FlightMap/               -- FM_* derivatives              ==
+-- ==    Blizzard_AnimaDiversionUI/        -- AnimaDiversion_* derivatives ==
+-- ==    Blizzard_BattlefieldMap/          -- uses base AreaPOI etc.       ==
+-- ==                                                                        ==
+-- ==  Four queries together cover the full surface:                         ==
 -- ==                                                                        ==
 -- ==  (1) Direct calls to risky tooltip builders                            ==
 -- ==      pattern: TaskPOI_OnEnter | AreaPoiUtil.TryShowTooltip            ==
@@ -322,12 +589,21 @@ end
 -- ==  (2) Templates inheriting OnMouseEnter from a covered template via    ==
 -- ==      XML or via CreateSubPin / CreateFromMixins:                       ==
 -- ==      pattern: CreateSubPin | inherits=".*PinTemplate"                  ==
+-- ==             | CreateFromMixins\((WorldQuest|BonusObjective|AreaPOI|   ==
+-- ==               QuestOffer|Invasion|Vignette|QuestBlob)PinMixin\)        ==
 -- ==      Then cross-reference each hit against the covered mixins above.   ==
 -- ==                                                                        ==
 -- ==  (3) Templates that delegate to a covered OnMouseEnter via a live     ==
 -- ==      table lookup inside their own OnMouseEnter body:                  ==
 -- ==      pattern: \.OnMouseEnter\(self\)                                   ==
 -- ==      Cross-reference the target mixin against the covered list.        ==
+-- ==                                                                        ==
+-- ==  (4) All GetPinTemplate return values ACROSS every audited folder:    ==
+-- ==      pattern: return "([A-Za-z_]+PinTemplate)"                        ==
+-- ==      Every template name that appears here MUST match one of the     ==
+-- ==      dispatch branches in PatchPinForCustomTooltip. If a template     ==
+-- ==      isn't matched but its mixin chain uses a covered mixin, add it   ==
+-- ==      to the appropriate branch. Silent misses live here.              ==
 -- ==                                                                        ==
 -- ==  Negative-result reference: BaseMapPoiPinMixin:OnMouseEnter (Shared-   ==
 -- ==  MapPoiTemplates.lua:163) calls only CheckShowTooltip, which uses     ==
@@ -1003,22 +1279,35 @@ local function PatchPinForCustomTooltip(pin, pinTemplate)
   pin.pwm_custom_tooltip_patched = true
 
   if pinTemplate == "WorldQuestPinTemplate"
+      or pinTemplate == "WorldMap_WorldQuestPinTemplate"       -- Blizzard_WorldMap/WM_WorldQuestDataProvider.xml
+      or pinTemplate == "FlightMap_WorldQuestPinTemplate"      -- Blizzard_FlightMap/FM_WorldQuestDataProvider.xml
+      or pinTemplate == "AnimaDiversion_WorldQuestPinTemplate" -- Blizzard_AnimaDiversionUI/AD_WorldQuestDataProvider.xml
       or pinTemplate == "BonusObjectivePinTemplate"
       or pinTemplate == "ThreatObjectivePinTemplate" then
-    -- All three pin types have identical OnMouseEnter/OnMouseLeave structure
-    -- (see the audit-checklist note on the WorldQuest copy block above).
+    -- WorldQuest family: the three canvas-specific derivatives all use
+    -- CreateFromMixins(WorldQuestPinMixin) which snapshot-copies OnMouseEnter
+    -- verbatim -- their per-canvas subclasses only override RefreshVisuals /
+    -- OnLoad, never the hover handlers. The base "WorldQuestPinTemplate"
+    -- itself is a virtual XML template that no canvas creates directly (all
+    -- three canvases override GetPinTemplate to return their derivative) --
+    -- we still list it for defensive matching.
+    -- BonusObjective / ThreatObjective have identical OnMouseEnter/OnMouseLeave
+    -- structure to WorldQuest (see the audit-checklist note on the WorldQuest
+    -- copy block above).
     pin.OnMouseEnter = PWM_WorldQuestPin_OnMouseEnter
     pin.OnMouseLeave = PWM_WorldQuestPin_OnMouseLeave
 
   elseif pinTemplate == "AreaPOIPinTemplate"
       or pinTemplate == "AreaPOIEventPinTemplate"
-      or pinTemplate == "DelveEntrancePinTemplate" then
-    -- All three share the AreaPOIPinMixin OnMouseEnter (directly, via live
-    -- table-lookup delegation, or via CreateSubPin snapshot copy -- see the
-    -- comment above PWM_AreaPOIPin_OnMouseEnter). Capture THIS pin's mixin-
-    -- copied OnMouseLeave (Blizzard's original) so our wrapper can forward
-    -- the map TriggerEvents in it. Using the per-instance copy is mixin-
-    -- chain-agnostic.
+      or pinTemplate == "DelveEntrancePinTemplate"
+      or pinTemplate == "FlightMap_AreaPOIPinTemplate" then    -- Blizzard_FlightMap/FM_AreaPOIDataProvider.xml
+    -- All four share the AreaPOIPinMixin OnMouseEnter (directly, via live
+    -- table-lookup delegation, via CreateSubPin snapshot copy, or via XML
+    -- inheritance -- see the comment above PWM_AreaPOIPin_OnMouseEnter).
+    -- FlightMap_AreaPOIPinMixin = CreateFromMixins(AreaPOIPinMixin) with no
+    -- OnMouseEnter override. Capture THIS pin's mixin-copied OnMouseLeave
+    -- (Blizzard's original) so our wrapper can forward the map TriggerEvents
+    -- in it. Using the per-instance copy is mixin-chain-agnostic.
     local origLeave = pin.OnMouseLeave
     pin.OnMouseEnter = PWM_AreaPOIPin_OnMouseEnter
     pin.OnMouseLeave = function(self, ...)
@@ -1053,7 +1342,10 @@ local function PatchPinForCustomTooltip(pin, pinTemplate)
 
   elseif pinTemplate == "VignettePinTemplate"
       or pinTemplate == "VignettePinPOIButtonTemplate"
-      or pinTemplate == "FyrakkFlightVignettePinTemplate" then
+      or pinTemplate == "FyrakkFlightVignettePinTemplate"
+      or pinTemplate == "FlightMap_VignettePinTemplate" then   -- Blizzard_FlightMap/FM_VignetteDataProvider.xml
+    -- FlightMap_VignettePinMixin = CreateFromMixins(VignettePinMixin) with
+    -- no OnMouseEnter override (only OnLoad tweaks alpha/nudge).
     pin.OnMouseEnter = PWM_VignettePin_OnMouseEnter
     pin.OnMouseLeave = PWM_VignettePin_OnMouseLeave
 
@@ -1098,10 +1390,9 @@ end
 -- assignment happens at MapCanvas.lua:259, AFTER our wrapper runs at :257).
 -- Reading pin.pinTemplate inside our wrapper would yield nil.
 --
--- A __newindex metatable on WorldMapFrame.pinPools catches future pool
--- creation; existing pools at our load time are wrapped in a one-shot loop.
--- Patches are on the pin INSTANCE, so they survive pool recycling across
--- map opens.
+-- A __newindex metatable on <canvas>.pinPools catches future pool creation;
+-- existing pools at install time are wrapped in a one-shot loop. Patches
+-- are on the pin INSTANCE, so they survive pool recycling across map opens.
 --
 -- The wrapper handles two cases:
 --   * Fresh pin (isNew == true): set pin.OnMouseEnter / .OnMouseLeave as
@@ -1112,6 +1403,16 @@ end
 --     wrapper was installed, with Blizzard's original tooltip-trap-prone
 --     handler) would persist forever. See section (5) banner for the full
 --     reasoning behind the two paths.
+--
+-- Canvas coverage: WorldMapFrame is installed unconditionally at file load;
+-- FlightMapFrame is installed when Blizzard_FlightMap loads (LoD addon, only
+-- loads on flight-master interaction). Any canvas we don't cover lets the
+-- ORIGINAL Blizzard OnMouseEnter run on its pins, which for WorldQuest-
+-- family pins hits the "secret number" trap under PWM taint. Historically
+-- this section only covered WorldMapFrame -- the FlightMap coverage was
+-- added 2026-06-10 after a WorldQuest-tooltip error surfaced from a pin
+-- template we didn't dispatch (WorldMap_WorldQuestPinTemplate) and a
+-- follow-up audit uncovered FlightMap / AnimaDiversion siblings too.
 --
 do
   local function PatchPin(pin, pinTemplate)
@@ -1141,21 +1442,11 @@ do
     pool.Acquire = function(self, ...)
       local pin, isNew = origAcquire(self, ...)
       if pin then
-        -- For isNew==true, Blizzard's AcquirePin will SetScript("OnEnter",
-        -- pin.OnMouseEnter) at Blizzard_MapCanvas.lua:283 immediately after
-        -- we return -- so updating the table field is enough; Blizzard picks
-        -- up our function. We must NOT call SetScript ourselves on a new
-        -- pin: the assert at :280 (still inside `if newPin then`) would trip.
-        --
-        -- For isNew==false (reused pin), Blizzard SKIPS the SetScript block
-        -- entirely -- the pin keeps whatever OnEnter/OnLeave scripts were
-        -- bound at its original creation. If that original creation happened
-        -- before our wrapper was installed (e.g. another addon triggered an
-        -- AcquirePin during load before us), the binding points at the
-        -- ORIGINAL Blizzard handler forever, regardless of how many times we
-        -- overwrite the table field. Detect that case (we've never patched
-        -- this pin before) and rebind explicitly. The :280 assert is inside
-        -- `if newPin then` and does not fire on reuse, so this is safe.
+        -- Fresh pin: field-write only; Blizzard SetScripts it for us.
+        -- Reused pin we've never patched: field-write + explicit SetScript,
+        -- because Blizzard skips the SetScript block on reuse and any stale
+        -- binding from the pin's original creation would persist.
+        -- See section (6) header for the full rationale.
         local needsScriptRebind = (not isNew) and (not pin.pwm_custom_tooltip_patched)
         PatchPin(pin, pinTemplate)
         if needsScriptRebind then
@@ -1167,18 +1458,46 @@ do
     end
   end
 
-  -- Wrap pools that already exist at our load time (if any).
-  for pinTemplate, pool in pairs(WorldMapFrame.pinPools) do
-    WrapPoolAcquire(pool, pinTemplate)
-  end
+  local function InstallOnCanvas(canvas)
+    if not canvas or not canvas.pinPools or canvas.pwm_canvas_installed then return end
+    canvas.pwm_canvas_installed = true
 
-  -- Catch future pool creation via a __newindex on the pinPools table.
-  setmetatable(WorldMapFrame.pinPools, {
-    __newindex = function(t, pinTemplate, pool)
-      rawset(t, pinTemplate, pool)
+    -- Wrap pools that already exist on this canvas (if any).
+    for pinTemplate, pool in pairs(canvas.pinPools) do
       WrapPoolAcquire(pool, pinTemplate)
     end
-  })
+
+    -- Catch future pool creation via a __newindex on the pinPools table.
+    -- (Note: this replaces any existing metatable on pinPools. Blizzard
+    -- doesn't set one, so this is fine today; if a future patch does, we'd
+    -- need to chain.)
+    setmetatable(canvas.pinPools, {
+      __newindex = function(t, pinTemplate, pool)
+        rawset(t, pinTemplate, pool)
+        WrapPoolAcquire(pool, pinTemplate)
+      end
+    })
+  end
+
+  -- Main map: always available at addon load.
+  InstallOnCanvas(WorldMapFrame)
+
+  -- Flight map: load-on-demand. Blizzard_FlightMap loads when the player
+  -- interacts with a flight master; FlightMapFrame is a global after that.
+  -- If it's already loaded (edge case: /reload while at a flight master),
+  -- install immediately; otherwise wait for ADDON_LOADED.
+  if _G.FlightMapFrame then
+    InstallOnCanvas(FlightMapFrame)
+  else
+    local flightWatcher = CreateFrame("Frame")
+    flightWatcher:RegisterEvent("ADDON_LOADED")
+    flightWatcher:SetScript("OnEvent", function(self, _, addonName)
+      if addonName == "Blizzard_FlightMap" then
+        InstallOnCanvas(_G.FlightMapFrame)
+        self:UnregisterAllEvents()
+      end
+    end)
+  end
 end
 
 
