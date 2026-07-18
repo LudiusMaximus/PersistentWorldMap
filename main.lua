@@ -363,6 +363,14 @@ end)
 
 
 local updateMapFrame = CreateFrame("Frame")
+updateMapFrame:SetScript("OnEvent", function()
+  -- Sometimes does not work right away.
+  C_Timer.NewTimer(0.5, function()
+    if not WorldMapFrame:IsShown() then return end
+    WorldMapFrame:OnMapChanged()
+    Addon.PlayerPingAnimation(false)
+  end)
+end)
 -- Needed to remove tomb stone pin.
 updateMapFrame:RegisterEvent("PLAYER_UNGHOST")
 -- Sometimes accepting (world) quests does not remove the exlamation mark.
@@ -377,14 +385,8 @@ updateMapFrame:RegisterEvent("TREASURE_PICKER_CACHE_FLUSH")
 updateMapFrame:RegisterEvent("CHEST_REWARDS_UPDATED_FROM_SERVER")
 -- To refresh map when neighborhood house ownerships change.
 updateMapFrame:RegisterEvent("NEIGHBORHOOD_INFO_UPDATED")
-updateMapFrame:SetScript("OnEvent", function()
-  -- Sometimes does not work right away.
-  C_Timer.NewTimer(0.5, function()
-    if not WorldMapFrame:IsShown() then return end
-    WorldMapFrame:OnMapChanged()
-    Addon.PlayerPingAnimation(false)
-  end)
-end)
+-- To mark instance bosses as defeated.
+updateMapFrame:RegisterEvent("BOSS_KILL")
 
 
 -- RareScanner integration: refresh RareScanner's map pins after events that
