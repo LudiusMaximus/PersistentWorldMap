@@ -184,9 +184,7 @@ Addon.OpenOptionsMenu = function()
       function()
         PWM_config.showReadingEmote = not PWM_config.showReadingEmote
         if WorldMapFrame:IsShown() then
-          local isInstance, instanceType = IsInInstance()
-          local inPvP = isInstance and instanceType == "pvp"
-          if PWM_config.showReadingEmote and not inPvP then
+          if PWM_config.showReadingEmote and not IsInInstance() then
             C_ChatInfo.PerformEmote("READ", nil, true)
           else
             C_ChatInfo.CancelEmote()
@@ -195,7 +193,7 @@ Addon.OpenOptionsMenu = function()
       end
     )
     emoteCheckbox:SetOnEnter(function(frame, desc)
-      ShowCustomTooltip(frame, "Show reading emote", "When opening the world map, your character performs a map-reading animation. Uncheck to disable it.\n\nNote: This animation is always suppressed inside battlegrounds to avoid a World of Warcraft restriction that would otherwise cause an error.")
+      ShowCustomTooltip(frame, "Show reading emote", "When opening the world map, your character performs a map-reading animation. Uncheck to disable it.\n\nNote: This animation is always suppressed inside instances (battlegrounds, dungeons, raids, etc.) to avoid a World of Warcraft restriction that would otherwise cause an error.")
     end)
     emoteCheckbox:SetOnLeave(function(frame)
       HideCustomTooltipDelayed(0.33)

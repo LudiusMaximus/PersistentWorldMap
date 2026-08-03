@@ -321,8 +321,11 @@ local function StopMapUpdates()
   end
 end
 
--- Use in OnShow/OnHide
-WorldMapFrame:HookScript("OnShow", StartMapUpdates)
+-- Use in OnShow/OnHide.
+-- OnShow goes through taintPrevent.lua section (2)'s RegisterWorldMapOnShow
+-- so the callback still fires when section (2) SetScripts OnShow while in
+-- an instance -- see the section (2) "OWN OnShow HOOKS" note.
+Addon.RegisterWorldMapOnShow(StartMapUpdates)
 WorldMapFrame:HookScript("OnHide", StopMapUpdates)
 
 

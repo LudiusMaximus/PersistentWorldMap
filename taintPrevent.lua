@@ -19,14 +19,15 @@ local folderName, Addon = ...
 --        Add a "Reload UI" button so we can offer a graceful recovery from
 --        a residual taint trip without forcing the user to disable PWM.
 --
---    (2) PvP-instance OnShow replacement to skip the READ emote
---        On entering a PvP instance, SetScript WorldMapFrame:OnShow to a
---        manually-inlined copy of WorldMapMixin:OnShow with the
---        C_ChatInfo.PerformEmote("READ", ...) line at Blizzard_WorldMap.
---        lua:352 omitted. On leaving, restore the raw Blizzard handler.
---        This has a patch-day maintenance cost -- diff Blizzard's OnShow
---        against the local copy every retail patch. Also installs the
---        reading-emote opt-out HookScript (formerly section (3)).
+--    (2) In-instance OnShow replacement to skip the READ emote
+--        On entering any instance (BG, arena, 5-man, raid, scenario),
+--        SetScript WorldMapFrame:OnShow to a manually-inlined copy of
+--        WorldMapMixin:OnShow with the C_ChatInfo.PerformEmote("READ", ...)
+--        line at Blizzard_WorldMap.lua:352 omitted. On leaving, restore
+--        the raw Blizzard handler. This has a patch-day maintenance cost
+--        -- diff Blizzard's OnShow against the local copy every retail
+--        patch. Also installs the reading-emote opt-out HookScript
+--        (formerly section (3)).
 --
 --    (3) [reserved] -- see section (2)
 --        The reading-emote opt-out HookScript that used to live here moved
@@ -34,9 +35,9 @@ local folderName, Addon = ...
 --        restore cycle. Numbering preserved to keep (4)-(10) stable.
 --
 --    (4) Combat-end refresh
---        Declares Addon.reloadAfterCombat (set by section 5's protected-call
---        shadows) and the PLAYER_REGEN_ENABLED handler that refreshes the
---        map once combat ends.
+--        Declares Addon.reloadAfterCombat (set by section (6)'s protected-
+--        call shadows) and the PLAYER_REGEN_ENABLED handler that refreshes
+--        the map once combat ends.
 --
 --    (5) Custom-tooltip system for map pins
 --        PWM-owned tooltip frame + PWM-local copies of the Blizzard tooltip-
@@ -51,7 +52,9 @@ local folderName, Addon = ...
 --    (6) Per-pin protected-call shadowing + pool-acquire hook
 --        Shadow SetPassThroughButtons / SetPropagateMouseClicks on each pin
 --        to skip during combat. The pool-acquire wrapper also dispatches to
---        the custom-tooltip installer from section (5).
+--        the custom-tooltip installer from section (5). Installed on
+--        WorldMapFrame at load and on FlightMapFrame lazily when
+--        Blizzard_FlightMap loads.
 --
 --    (7) HookPins
 --        Manual OnClick emulation for boss / dungeon pins during combat
@@ -87,28 +90,27 @@ local folderName, Addon = ...
 -- from the current behavior and features silently regress.
 --
 -- ----------------------------------------------------------------------------
--- AUDIT (A) -- Section (2)'s PvPOnShow copy of WorldMapMixin:OnShow
+-- AUDIT (A) -- Section (2)'s InstanceOnShow copy of WorldMapMixin:OnShow
 -- ----------------------------------------------------------------------------
 --
 --   Blizzard source:  Blizzard_WorldMap/Blizzard_WorldMap.lua
 --   Blizzard symbol:  WorldMapMixin:OnShow           (lines 335-368 as of 12.0.5)
---   Our copy:         local function PvPOnShow(self) in section (2) below.
+--   Our copy:         local function InstanceOnShow(self) in section (2).
 --   Deviation:        omit the C_ChatInfo.PerformEmote("READ", nil, true)
 --                     call at line :352. Every other line must match.
 --
 --   Procedure:
 --     1. Open the Blizzard source at the cited symbol.
---     2. Diff line-by-line against PvPOnShow.
+--     2. Diff line-by-line against InstanceOnShow.
 --     3. Mirror ANY change (added line, reordered call, new local, ...).
 --     4. Keep the omitted-line comment where the PerformEmote call would be.
---     5. Update the "Last synced" date in PvPOnShow's header comment
---        AND in the section (2) banner's MAINTENANCE note.
+--     5. Update the "Last synced" date in InstanceOnShow's header comment.
 --
 --   Symptoms of a stale copy:
---     * BG map open error resurfaces (Blizzard moved the emote to a
---       different line and our copy still runs the old version).
---     * Missing UI behaviors in BG map open (Blizzard added a line we
---       don't replicate: minimap sync, side panel state, etc.).
+--     * In-instance map open error resurfaces (Blizzard moved the emote
+--       to a different line and our copy still runs the old version).
+--     * Missing UI behaviors in in-instance map open (Blizzard added a
+--       line we don't replicate: minimap sync, side panel state, etc.).
 --
 -- ----------------------------------------------------------------------------
 -- AUDIT (B) -- Section (5)'s Blizzard-source tooltip-builder copies
@@ -188,6 +190,7 @@ local folderName, Addon = ...
 -- ============================================================================
 
 local InCombatLockdown              = _G.InCombatLockdown
+local IsInInstance                  = _G.IsInInstance
 local C_Map_GetMapInfo              = _G.C_Map.GetMapInfo
 local QuestLogPopupDetailFrame      = _G.QuestLogPopupDetailFrame
 local WorldMapFrame                 = _G.WorldMapFrame
@@ -221,13 +224,13 @@ end
 
 
 -- ============================================================================
--- (2) PvP-instance OnShow replacement to skip the READ emote
+-- (2) In-instance OnShow replacement to skip the READ emote
 -- ============================================================================
 --
 -- HISTORICAL CONTEXT (do NOT reintroduce these approaches):
 --
 --   b5af17d, 20ab7b1, 16afd8f: wrapped C_ChatInfo.PerformEmote /
---   .CancelEmote to filter the READ emote in PvP. The wrapper WRITE from
+--   .CancelEmote to filter the READ emote. The wrapper WRITE from
 --   tainted addon-load context permanently tainted the FIELD ENTRY on
 --   C_ChatInfo.PerformEmote for the session; every subsequent secure read
 --   (any /sorry, /wave, etc. typed by the user) inherited PWM taint and
@@ -241,51 +244,90 @@ end
 --
 -- CURRENT APPROACH:
 --
--- The PvP error stems from OnShow's `C_ChatInfo.PerformEmote("READ", ...)`
--- at Blizzard_WorldMap.lua:352 reaching a protected C downstream when
+-- The error stems from OnShow's `C_ChatInfo.PerformEmote("READ", ...)` at
+-- Blizzard_WorldMap.lua:352 reaching a protected C downstream when
 -- OnShow's execution has any PWM taint. Since PWM-taint on WorldMapFrame
 -- .mapID is inevitable during normal use (writing to mapID is PWM's
 -- reason to exist), we must stop the emote line from being called at all
--- while in PvP.
+-- inside any instance where the downstream is protected. Observed to
+-- trip in PvP instances (BG/arena), 5-man dungeons, and raids -- so we
+-- gate on IsInInstance() rather than any narrower instanceType check.
 --
---   * On entering a PvP instance (PLAYER_ENTERING_WORLD), SetScript
---     WorldMapFrame's OnShow to PvPOnShow: a MANUALLY-INLINED copy of
---     Blizzard's WorldMapMixin:OnShow (Blizzard_WorldMap.lua:335-368)
+--   * On entering an instance (PLAYER_ENTERING_WORLD), SetScript
+--     WorldMapFrame's OnShow to InstanceOnShow: a MANUALLY-INLINED copy
+--     of Blizzard's WorldMapMixin:OnShow (Blizzard_WorldMap.lua:335-368)
 --     with the C_ChatInfo.PerformEmote line at :352 omitted. The emote
---     never fires while in PvP, so no protected downstream is reached.
---   * On leaving a PvP instance, SetScript back to the raw Blizzard
---     handler captured at addon load, and re-add the reading-emote-opt-
---     out HookScript that SetScript wipes.
+--     never fires while in an instance, so no protected downstream is
+--     reached.
+--   * On leaving an instance, SetScript back to the raw Blizzard handler
+--     captured at addon load, and re-add the reading-emote-opt-out
+--     HookScript that SetScript wipes.
 --
--- Why not always SetScript (both in and out of PvP): our wrapper's
+-- Why not always SetScript (both in and out of instances): our wrapper's
 -- execution is PWM-tainted (we're addon-defined). When Blizzard's OnShow
 -- code runs UNDER that taint, downstream MoneyFrame widgets and other
 -- tooltip machinery inherit taint and emit "secret number" arithmetic
 -- errors on the map's own header. Empirically observed on 2026-04-01
 -- (commit 20ab7b1 moved away from SetScript for exactly this reason).
--- By SetScript'ing only in PvP and reverting on exit, outside PvP OnShow
--- runs on Blizzard's raw handler with no PWM taint at all.
+-- By SetScript'ing only inside instances and reverting on exit, open-
+-- world OnShow runs on Blizzard's raw handler with no PWM taint at all.
 --
 -- MAINTENANCE: see the PATCH-DAY MAINTENANCE MANUAL at the top of this
--- file (Audit (A)). "Last synced" date lives inline in the PvPOnShow copy
--- below and is the single source of truth.
+-- file (Audit (A)). "Last synced" date lives inline in the InstanceOnShow
+-- copy below and is the single source of truth.
 --
--- OTHER-ADDON HOOKS: SetScript wipes any HookScript-wrappers on the
--- frame. When we SetScript to PvPOnShow, hooks from other addons stop
--- firing until we restore. On restore we re-add PWM's own reading-emote
--- HookScript; we cannot restore third-party hooks automatically. Given
--- that most addons HookScript at load time (before any PvP entry), this
--- is only a real issue if the user /reloads DURING a PvP session, in
--- which case freshly-loaded hooks get wiped on next PvP exit.
+-- OWN OnShow HOOKS: SetScript wipes HookScript-wrappers, so if PWM's own
+-- OnShow logic lived as HookScripts, entering an instance would wipe them
+-- and (a) InstanceOnShow wouldn't call them either, so they'd stop firing
+-- until the next map close-and-reopen after exit; (b) on instance exit
+-- we'd have to re-add them all manually. To avoid both problems, PWM's
+-- own OnShow work is registered via Addon.RegisterWorldMapOnShow (defined
+-- below) and dispatched from a single point that both the plain HookScript
+-- (outside instances) and InstanceOnShow (inside instances) call. Other
+-- PWM files (restoreAndReset.lua) and other sections (section (10)) use
+-- this registration instead of HookScript for the same reason.
+--
+-- THIRD-PARTY OnShow HOOKS -- KNOWN LIMITATION:
+-- SetScript replaces the whole OnShow hook chain with InstanceOnShow, so
+-- any HookScripts other addons attached to WorldMapFrame:OnShow do NOT
+-- fire while the player is inside an instance. Popular map addons that
+-- HookScript OnShow (Mapster, Leatrix_Maps, and similar) therefore skip
+-- their in-instance customizations. Their hooks resume automatically on
+-- instance exit -- see the restore path below, which SetScripts the frame
+-- back to the captured pre-transition wrapper (Blizzard's OnShow + every
+-- HookScript that was on it at the moment we transitioned in, ours and
+-- third-party alike).
+--
+-- Third-party hooks added DURING an instance wrap InstanceOnShow and do
+-- fire in-instance, but are then dropped on exit for the symmetric
+-- reason (our restore doesn't know about them). This mainly affects the
+-- /reload-during-an-instance case.
+--
+-- Why we accept this: the alternatives are worse. Calling the captured
+-- pre-transition wrapper from InstanceOnShow to fan out third-party
+-- hooks in-instance would re-run Blizzard's OnShow first (that's how
+-- HookScript composition works -- the original is embedded, not
+-- separable), which fires the PerformEmote we're specifically avoiding.
+-- WoW doesn't expose an API to iterate a frame's HookScripts
+-- individually, so we can't call "just the hooks" without also calling
+-- Blizzard's OnShow. Temporarily swapping C_ChatInfo.PerformEmote around
+-- the call would work mechanically but re-opens the field-entry taint
+-- trap that broke /sorry (see HISTORICAL CONTEXT above).
+--
+-- Post-hooks on C_ChatInfo.PerformEmote itself (Leatrix_Maps's approach)
+-- are POST-only -- they cancel the emote animation AFTER PerformEmote has
+-- already fired ADDON_ACTION_BLOCKED from tainted execution. Fine for a
+-- cosmetic emote toggle on an addon that doesn't taint mapID; useless
+-- for suppressing the underlying error PWM has to deal with.
 --
 do
-  local function IsInPvPInstance()
-    local _, instanceType = IsInInstance()
-    return instanceType == "pvp"
+  -- Callback list used by both the HookScript below (outside instances)
+  -- and by InstanceOnShow (inside instances). Forward-declared so
+  -- InstanceOnShow can close over it.
+  local onShowCallbacks = {}
+  Addon.RegisterWorldMapOnShow = function(fn)
+    table.insert(onShowCallbacks, fn)
   end
-
-  -- Capture Blizzard's raw OnShow BEFORE anything else HookScripts it.
-  local origOnShowHandler = WorldMapFrame:GetScript("OnShow")
 
   -- ------------------------------------------------------------------------
   -- MANUAL COPY of WorldMapMixin:OnShow (Blizzard_WorldMap.lua:335-368).
@@ -294,7 +336,7 @@ do
   -- Deviation from source: the C_ChatInfo.PerformEmote("READ", nil, true)
   -- call at line :352 is intentionally OMITTED here.
   -- ------------------------------------------------------------------------
-  local function PvPOnShow(self)
+  local function InstanceOnShow(self)
     if self.needUpdateDisplayState then
       local displayState = self:GetOpenDisplayState()
       self:SetDisplayState(displayState)
@@ -330,38 +372,49 @@ do
     end
 
     EventRegistry:TriggerEvent("WorldMapOnShow")
+
+    -- Run PWM's own registered OnShow callbacks (see the OWN OnShow HOOKS
+    -- note in the section (2) header).
+    for _, fn in ipairs(onShowCallbacks) do fn(self) end
   end
 
-  -- Reading-emote opt-out hook. Runs after Blizzard's original OnShow
-  -- outside PvP (where PerformEmote actually fires); cancels the emote if
-  -- the user has disabled it in PWM options. Cheap call, no field write.
-  local function ReadingEmoteOptOutHook(self)
-    if not PWM_config.showReadingEmote and not IsInPvPInstance() then
+  -- Dispatch HookScript: runs the callbacks after Blizzard's original
+  -- OnShow when we're NOT inside an instance. Inside instances,
+  -- InstanceOnShow calls the same callbacks directly at its tail.
+  WorldMapFrame:HookScript("OnShow", function(self)
+    for _, fn in ipairs(onShowCallbacks) do fn(self) end
+  end)
+
+  -- Reading-emote opt-out. Cancels the emote after Blizzard's OnShow fired
+  -- it, if the user has disabled it in PWM options. Only meaningful outside
+  -- instances (inside, InstanceOnShow doesn't fire the emote in the first
+  -- place). Cheap call, no field write.
+  Addon.RegisterWorldMapOnShow(function(self)
+    if not PWM_config.showReadingEmote and not IsInInstance() then
       C_ChatInfo.CancelEmote()
     end
-  end
+  end)
 
-  -- Initial install (we're outside PvP at addon load in the vast majority
-  -- of cases; if we happen to be inside PvP already, PLAYER_ENTERING_WORLD
-  -- fires immediately below and switches to PvPOnShow, wiping this hook).
-  WorldMapFrame:HookScript("OnShow", ReadingEmoteOptOutHook)
+  local instanceActive = false
+  local preInstanceOnShow = nil  -- Blizzard OnShow + accumulated HookScripts
 
-  local pvpActive = false
-
-  local pvpTransitionFrame = CreateFrame("Frame")
-  pvpTransitionFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-  pvpTransitionFrame:SetScript("OnEvent", function()
-    if IsInPvPInstance() then
-      if not pvpActive then
-        pvpActive = true
-        WorldMapFrame:SetScript("OnShow", PvPOnShow)
+  local instanceTransitionFrame = CreateFrame("Frame")
+  instanceTransitionFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+  instanceTransitionFrame:SetScript("OnEvent", function()
+    if IsInInstance() then
+      if not instanceActive then
+        instanceActive = true
+        -- Snapshot the full current OnShow (Blizzard's + all HookScripts,
+        -- including our callback dispatch) so we can restore it verbatim
+        -- on exit.
+        preInstanceOnShow = WorldMapFrame:GetScript("OnShow")
+        WorldMapFrame:SetScript("OnShow", InstanceOnShow)
       end
     else
-      if pvpActive then
-        pvpActive = false
-        WorldMapFrame:SetScript("OnShow", origOnShowHandler)
-        -- SetScript wiped the HookScript wrapper; re-add ours.
-        WorldMapFrame:HookScript("OnShow", ReadingEmoteOptOutHook)
+      if instanceActive then
+        instanceActive = false
+        WorldMapFrame:SetScript("OnShow", preInstanceOnShow)
+        preInstanceOnShow = nil
       end
     end
   end)
@@ -384,8 +437,8 @@ end
 --
 -- Section (6)'s per-pin protected-call shadows skip protected calls during
 -- combat and set this flag so we know a refresh is needed when combat ends.
--- Exposed on Addon because main.lua / restoreAndReset.lua also set it (for
--- their own deferred-refresh paths).
+-- Exposed on Addon because restoreAndReset.lua's RestoreMapState / ResetMap
+-- also set it when they hit InCombatLockdown().
 --
 Addon.reloadAfterCombat = false
 
@@ -430,7 +483,7 @@ end
 -- ==  e.g. AreaPOIEventPinMixin built via AreaPOIPinMixin:CreateSubPin(...) ==
 -- ==  -- snapshot-copies methods at Blizzard load time, BEFORE our addon    ==
 -- ==  can edit the parent mixin. Per-instance replacement (driven by the    ==
--- ==  pool-acquire hook in section 6) is mixin-chain-agnostic.              ==
+-- ==  pool-acquire hook in section (6)) is mixin-chain-agnostic.            ==
 -- ==                                                                        ==
 -- ==  How OnMouseEnter / OnMouseLeave get installed (two paths):            ==
 -- ==                                                                        ==
@@ -1732,7 +1785,10 @@ do
       WorldMapFrame:Raise()
     end)
 
-    WorldMapFrame:HookScript("OnShow", function()
+    -- Goes through section (2)'s RegisterWorldMapOnShow so it still fires
+    -- while section (2) SetScripts OnShow to InstanceOnShow inside an
+    -- instance -- see the section (2) "OWN OnShow HOOKS" note.
+    Addon.RegisterWorldMapOnShow(function()
       CloseEncounterJournal()
       CloseQuestLogPopupDetailFrame()
     end)
