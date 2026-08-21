@@ -10,7 +10,6 @@ local GetTime                   = _G.GetTime
 local WorldMapFrame             = _G.WorldMapFrame
 
 local IsShiftKeyDown            = _G.IsShiftKeyDown
-local GetScaledCursorPosition   = _G.GetScaledCursorPosition
 
 
 -- To prevent player pin pings when we don't need them.
@@ -161,6 +160,10 @@ end
 
 
 -- Disable default zoom.
+-- Blizzard's default mouse-wheel zoom snaps hard between zoom levels (no
+-- smoothing). Their code has a SMOOTH mode (MAP_CANVAS_MOUSE_WHEEL_ZOOM_BEHAVIOR_SMOOTH)
+-- that never fully shipped and doesn't hold up in practice. We implement our own own
+-- smooth zoom below (see ZoomAndPan / ZoomTickerFunction above).
 WorldMapFrame.ScrollContainer:SetMouseWheelZoomMode(MAP_CANVAS_MOUSE_WHEEL_ZOOM_BEHAVIOR_NONE)
 
 -- Override mouse wheel for custom zoom behavior.
@@ -266,7 +269,13 @@ local resetMap = false
 WorldMapFrame.ScrollContainer:HookScript("OnMouseDown", function(self, button)
   if button == "LeftButton" then
     isMouseDown = true
-    lastCursorX, lastCursorY = GetScaledCursorPosition()
+    -- self:GetCursorPosition() is the ScrollContainer's own method (see
+    -- Blizzard_MapCanvas/MapCanvas_ScrollContainerMixin.lua ::
+    -- MapCanvasScrollControllerMixin:GetCursorPosition). It divides
+    -- the raw GetCursorPosition by the map's effective scale, giving
+    -- UI-scaled coordinates. Replaces the 12.1-removed
+    -- GetScaledCursorPosition().
+    lastCursorX, lastCursorY = self:GetCursorPosition()
 
     if self:CanPan() then
       -- Stop any zoom animation.
@@ -315,7 +324,7 @@ WorldMapFrame.ScrollContainer:HookScript("OnUpdate", function(self)
   -- Disable auto-centering and stop zooming when player starts to drag.
   if isMouseDown then
     ZoomAndPanStop()
-    local cursorX, cursorY = GetScaledCursorPosition()
+    local cursorX, cursorY = self:GetCursorPosition()
     if cursorX ~= lastCursorX or cursorY ~= lastCursorY then
       Addon.DisableCenterOnPlayer()
     end

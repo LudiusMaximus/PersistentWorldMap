@@ -94,7 +94,7 @@ local folderName, Addon = ...
 -- ----------------------------------------------------------------------------
 --
 --   Blizzard source:  Blizzard_WorldMap/Blizzard_WorldMap.lua
---   Blizzard symbol:  WorldMapMixin:OnShow           (lines 335-368 as of 12.0.5)
+--   Blizzard symbol:  WorldMapMixin:OnShow           (lines 342-376 as of 12.1.0)
 --   Our copy:         local function InstanceOnShow(self) in section (2).
 --   Deviation:        omit the C_ChatInfo.PerformEmote("READ", nil, true)
 --                     call at line :352. Every other line must match.
@@ -255,7 +255,7 @@ end
 --
 --   * On entering an instance (PLAYER_ENTERING_WORLD), SetScript
 --     WorldMapFrame's OnShow to InstanceOnShow: a MANUALLY-INLINED copy
---     of Blizzard's WorldMapMixin:OnShow (Blizzard_WorldMap.lua:335-368)
+--     of Blizzard's WorldMapMixin:OnShow (Blizzard_WorldMap.lua:342-376)
 --     with the C_ChatInfo.PerformEmote line at :352 omitted. The emote
 --     never fires while in an instance, so no protected downstream is
 --     reached.
@@ -330,8 +330,8 @@ do
   end
 
   -- ------------------------------------------------------------------------
-  -- MANUAL COPY of WorldMapMixin:OnShow (Blizzard_WorldMap.lua:335-368).
-  -- Last synced 2026-06-10 vs Midnight 12.0.5. See PATCH-DAY MANUAL,
+  -- MANUAL COPY of WorldMapMixin:OnShow (Blizzard_WorldMap.lua:342-376).
+  -- Last synced 2026-08-04 vs Midnight 12.1.0. See PATCH-DAY MANUAL,
   -- Audit (A) at top of file for the sync procedure.
   -- Deviation from source: the C_ChatInfo.PerformEmote("READ", nil, true)
   -- call at line :352 is intentionally OMITTED here.
@@ -516,17 +516,17 @@ end
 -- ==  PWM copy here and mirror any change. If you skip this audit,          ==
 -- ==  tooltip content silently diverges from Blizzard's intent.             ==
 -- ==                                                                        ==
--- ==  AUDIT CHECKLIST  (last audited: 2026-06-10 vs Midnight 12.0.5)        ==
+-- ==  AUDIT CHECKLIST  (last audited: 2026-08-04 vs Midnight 12.1.0)        ==
 -- ==                                                                        ==
 -- ==    Blizzard_FrameXMLUtil/AreaPoiUtil.lua                               ==
 -- ==        AreaPoiUtil.TryShowTooltip                lines 3-72            ==
 -- ==                                                                        ==
 -- ==    Blizzard_GameTooltip/Mainline/GameTooltip.lua                       ==
--- ==        (local) AddFloorLocationLine              lines 619-625         ==
--- ==        GameTooltip_AddQuest                      lines 627-745         ==
+-- ==        (local) AddFloorLocationLine              lines 633-639         ==
+-- ==        GameTooltip_AddQuest                      lines 641-759         ==
 -- ==                                                                        ==
 -- ==    Blizzard_UIPanels_Game/Mainline/WorldMapFrame.lua                   ==
--- ==        TaskPOI_OnEnter                           lines 159-179         ==
+-- ==        TaskPOI_OnEnter                           lines 167-187         ==
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/AreaPOIDataProvider.lua             ==
 -- ==        AreaPOIPinMixin:OnMouseEnter              lines 159-181         ==
@@ -546,7 +546,7 @@ end
 -- ==         load; no DelveEntrance-specific OnMouseEnter to mirror.)       ==
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/QuestOfferDataProvider.lua          ==
--- ==        QuestHubPinGlowMixin:OnMouseEnter         lines 869-872         ==
+-- ==        QuestHubPinGlowMixin:OnMouseEnter         lines 884-887         ==
 -- ==        (calls AreaPOIPinMixin.OnMouseEnter(self) + self:AcknowledgeGlow ==
 -- ==         -- our dispatch branch preserves the AcknowledgeGlow call.)    ==
 -- ==                                                                        ==
@@ -811,7 +811,7 @@ end
 
 -- ----------------------------------------------------------------------------
 -- COPY OF: Blizzard_GameTooltip/Mainline/GameTooltip.lua :: AddFloorLocationLine
--- Source lines: 619-625 (file-local helper used by GameTooltip_AddQuest)
+-- Source lines: 633-639 (file-local helper used by GameTooltip_AddQuest)
 -- Adaptation: none -- already parameterized -- but we duplicate the body
 -- because Blizzard's version is `local` and unreachable from outside.
 -- ----------------------------------------------------------------------------
@@ -826,7 +826,7 @@ end
 
 -- ----------------------------------------------------------------------------
 -- COPY OF: Blizzard_GameTooltip/Mainline/GameTooltip.lua :: GameTooltip_AddQuest
--- Source lines: 627-745
+-- Source lines: 641-759
 -- Adaptation: every reference to the `GameTooltip` global rewritten to the
 -- local `tooltip = PWMTooltip`. The function's `self` argument still refers
 -- to the PIN, as in Blizzard's source.
@@ -955,7 +955,7 @@ end
 
 -- ----------------------------------------------------------------------------
 -- COPY OF: Blizzard_UIPanels_Game/Mainline/WorldMapFrame.lua :: TaskPOI_OnEnter
--- Source lines: 159-179
+-- Source lines: 167-187
 -- Adaptation: GameTooltip -> local tooltip = PWMTooltip;
 -- GameTooltip_AddQuest -> PWM_GameTooltip_AddQuest. The calling-quest
 -- branch still delegates to Blizzard's CallingPOI_OnEnter (calling quests
@@ -1004,7 +1004,7 @@ end
 --   * QuestHubPinTemplate                -- XML inherits AreaPOIPinTemplate;
 --                                          its mixin's OnMouseEnter delegates
 --                                          to AreaPOIPinMixin.OnMouseEnter
---                                          (QuestOfferDataProvider.lua:869-872)
+--                                          (QuestOfferDataProvider.lua:884-887)
 --                                          and additionally calls
 --                                          self:AcknowledgeGlow() -- preserved
 --                                          by the QuestHub branch in
@@ -1370,7 +1370,7 @@ local function PatchPinForCustomTooltip(pin, pinTemplate)
 
   elseif pinTemplate == "QuestHubPinTemplate" then
     -- QuestHubPinTemplate's mixin (QuestHubPinGlowMixin:OnMouseEnter at
-    -- QuestOfferDataProvider.lua:869-872) calls AreaPOIPinMixin.OnMouseEnter
+    -- QuestOfferDataProvider.lua:884-887) calls AreaPOIPinMixin.OnMouseEnter
     -- AND then self:AcknowledgeGlow(). If we just installed
     -- PWM_AreaPOIPin_OnMouseEnter we'd lose the AcknowledgeGlow call, so we
     -- wrap to preserve it. AcknowledgeGlow is on the pin instance via the
