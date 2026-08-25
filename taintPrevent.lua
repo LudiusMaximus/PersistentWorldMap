@@ -463,8 +463,8 @@ end
 -- ==  (5)  CUSTOM-TOOLTIP SYSTEM FOR MAP PINS                               ==
 -- ==                                                                        ==
 -- ==  Routes pin hover tooltips through a PWM-owned PWMTooltip frame so     ==
--- ==  that the "secret value" measurement-arithmetic trap that fires on    ==
--- ==  the canonical GameTooltip under PWM-origin taint doesn't trigger.    ==
+-- ==  that the "secret value" measurement-arithmetic trap that fires on     ==
+-- ==  the canonical GameTooltip under PWM-origin taint doesn't trigger.     ==
 -- ==                                                                        ==
 -- ==  Why this works: the secret-value protection applies to specific       ==
 -- ==  Blizzard canonical frames (the global GameTooltip and its built-in    ==
@@ -505,9 +505,9 @@ end
 -- ==  rebind via SetScript explicitly. The :280 assert is inside `if newPin ==
 -- ==  then` and does not fire on the reuse path, so SetScript is safe.      ==
 -- ==                                                                        ==
--- ==  +---------------------------------------------------------------+    ==
--- ==  |  MAINTENANCE WARNING -- READ BEFORE EVERY RETAIL PATCH        |    ==
--- ==  +---------------------------------------------------------------+    ==
+-- ==  +---------------------------------------------------------------+     ==
+-- ==  |  MAINTENANCE WARNING -- READ BEFORE EVERY RETAIL PATCH        |     ==
+-- ==  +---------------------------------------------------------------+     ==
 -- ==                                                                        ==
 -- ==  The functions in the BLIZZARD-SOURCE COPIES region below are          ==
 -- ==  MECHANICALLY copied from Blizzard source code, with GameTooltip       ==
@@ -533,12 +533,12 @@ end
 -- ==        (AreaPOIEventPinMixin, DelveEntrancePinMixin, QuestHubPin-      ==
 -- ==         GlowMixin all inherit/delegate to AreaPOIPinMixin:OnMouseEnter ==
 -- ==         -- see file pointers under their own dispatch branches.)       ==
--- ==        Canvas-specific XML inheritance:                                 ==
+-- ==        Canvas-specific XML inheritance:                                ==
 -- ==          Blizzard_FlightMap/FM_AreaPOIDataProvider.xml:5               ==
 -- ==            "FlightMap_AreaPOIPinTemplate" inherits AreaPOIPinTemplate  ==
--- ==            (mixin: FlightMap_AreaPOIPinMixin =                          ==
--- ==             CreateFromMixins(AreaPOIPinMixin), no OnMouseEnter        ==
--- ==             override.)                                                  ==
+-- ==            (mixin: FlightMap_AreaPOIPinMixin =                         ==
+-- ==             CreateFromMixins(AreaPOIPinMixin), no OnMouseEnter         ==
+-- ==             override.)                                                 ==
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/DelveEntranceDataProvider.lua       ==
 -- ==        DelveEntrancePinMixin = AreaPOIPinMixin:CreateSubPin(...) :42   ==
@@ -547,7 +547,7 @@ end
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/QuestOfferDataProvider.lua          ==
 -- ==        QuestHubPinGlowMixin:OnMouseEnter         lines 884-887         ==
--- ==        (calls AreaPOIPinMixin.OnMouseEnter(self) + self:AcknowledgeGlow ==
+-- ==        (calls AreaPOIPinMixin.OnMouseEnter(self) + self:AcknowledgeGlow =
 -- ==         -- our dispatch branch preserves the AcknowledgeGlow call.)    ==
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/WorldQuestDataProvider.lua          ==
@@ -556,14 +556,14 @@ end
 -- ==        The base "WorldQuestPinTemplate" itself is virtual only --      ==
 -- ==        every canvas overrides GetPinTemplate to return a derivative:   ==
 -- ==          Blizzard_WorldMap/WM_WorldQuestDataProvider.lua:4             ==
--- ==            -> "WorldMap_WorldQuestPinTemplate"                          ==
--- ==            (mixin: WorldMap_WorldQuestPinMixin =                        ==
+-- ==            -> "WorldMap_WorldQuestPinTemplate"                         ==
+-- ==            (mixin: WorldMap_WorldQuestPinMixin =                       ==
 -- ==             CreateFromMixins(WorldQuestPinMixin), no OnMouseEnter      ==
 -- ==             override -- snapshot preserves the base's tooltip path.)   ==
 -- ==          Blizzard_FlightMap/FM_WorldQuestDataProvider.lua:4            ==
--- ==            -> "FlightMap_WorldQuestPinTemplate"                         ==
+-- ==            -> "FlightMap_WorldQuestPinTemplate"                        ==
 -- ==          Blizzard_AnimaDiversionUI/AD_WorldQuestDataProvider.lua:4     ==
--- ==            -> "AnimaDiversion_WorldQuestPinTemplate"                    ==
+-- ==            -> "AnimaDiversion_WorldQuestPinTemplate"                   ==
 -- ==        All three derivatives snapshot WorldQuestPinMixin's handlers    ==
 -- ==        verbatim; PWM's WorldQuest branch dispatches on all four        ==
 -- ==        template names.                                                 ==
@@ -588,16 +588,17 @@ end
 -- ==        VignettePinBaseMixin:DisplayNormalTooltip lines 494-514         ==
 -- ==        VignettePinBaseMixin:DisplayPvpBountyTooltip lines 516-537      ==
 -- ==        VignettePinBaseMixin:DisplayTorghastTooltip lines 539-542       ==
--- ==        Canvas-specific XML inheritance:                                 ==
+-- ==        Canvas-specific XML inheritance:                                ==
 -- ==          Blizzard_FlightMap/FM_VignetteDataProvider.xml:5              ==
--- ==            "FlightMap_VignettePinTemplate" inherits VignettePinTemplate ==
--- ==            (mixin: FlightMap_VignettePinMixin =                         ==
--- ==             CreateFromMixins(VignettePinMixin), no OnMouseEnter       ==
--- ==             override.)                                                  ==
+-- ==            "FlightMap_VignettePinTemplate" inherits VignettePinTemplate =
+-- ==            (mixin: FlightMap_VignettePinMixin =                        ==
+-- ==             CreateFromMixins(VignettePinMixin), no OnMouseEnter        ==
+-- ==             override.)                                                 ==
 -- ==                                                                        ==
 -- ==    Blizzard_SharedMapDataProviders/QuestBlobDataProvider.lua           ==
 -- ==        QuestBlobPinMixin:UpdateTooltip           lines 182-229         ==
 -- ==        QuestBlobPinMixin:OnMouseEnter            lines 231-233         ==
+-- ==        QuestBlobPinMixin:OnMouseLeave            lines 235-239         ==
 -- ==                                                                        ==
 -- ==  Reference points (no copies, but our code relies on these line        ==
 -- ==  numbers being correct -- spot-check on patch days):                   ==
@@ -614,55 +615,55 @@ end
 -- ==                                                                        ==
 -- ==  HOW TO RE-AUDIT FOR NEWLY ADDED PIN TEMPLATES                         ==
 -- ==                                                                        ==
--- ==  IMPORTANT: run the queries below across ALL Blizzard_* addons that   ==
--- ==  add data providers to a map canvas -- NOT just the "shared" folder. ==
--- ==  Canvas-specific addons routinely OVERRIDE GetPinTemplate to return   ==
--- ==  their own derivative template name (e.g. WorldMap_WorldQuestPin-    ==
--- ==  Template) while snapshot-copying the base mixin's OnMouseEnter via  ==
--- ==  CreateFromMixins -- so the base pin template is never actually     ==
--- ==  created on that canvas, and matching only on the base template name ==
--- ==  is a silent miss. This bit us on 2026-06-10: our WorldQuestPin-     ==
--- ==  Template dispatch entry was never hit on WorldMapFrame because     ==
--- ==  Blizzard uses WorldMap_WorldQuestPinTemplate there.                ==
+-- ==  IMPORTANT: run the queries below across ALL Blizzard_* addons that    ==
+-- ==  add data providers to a map canvas -- NOT just the "shared" folder.   ==
+-- ==  Canvas-specific addons routinely OVERRIDE GetPinTemplate to return    ==
+-- ==  their own derivative template name (e.g. WorldMap_WorldQuestPin-      ==
+-- ==  Template) while snapshot-copying the base mixin's OnMouseEnter via    ==
+-- ==  CreateFromMixins -- so the base pin template is never actually        ==
+-- ==  created on that canvas, and matching only on the base template name   ==
+-- ==  is a silent miss. This bit us on 2026-06-10: our WorldQuestPin-       ==
+-- ==  Template dispatch entry was never hit on WorldMapFrame because        ==
+-- ==  Blizzard uses WorldMap_WorldQuestPinTemplate there.                   ==
 -- ==                                                                        ==
 -- ==  Folders to audit (retail):                                            ==
--- ==    Blizzard_SharedMapDataProviders/  -- base mixins and shared        ==
--- ==    Blizzard_WorldMap/                -- WM_* derivatives              ==
--- ==    Blizzard_FlightMap/               -- FM_* derivatives              ==
--- ==    Blizzard_AnimaDiversionUI/        -- AnimaDiversion_* derivatives ==
--- ==    Blizzard_BattlefieldMap/          -- uses base AreaPOI etc.       ==
+-- ==    Blizzard_SharedMapDataProviders/  -- base mixins and shared         ==
+-- ==    Blizzard_WorldMap/                -- WM_* derivatives               ==
+-- ==    Blizzard_FlightMap/               -- FM_* derivatives               ==
+-- ==    Blizzard_AnimaDiversionUI/        -- AnimaDiversion_* derivatives   ==
+-- ==    Blizzard_BattlefieldMap/          -- uses base AreaPOI etc.         ==
 -- ==                                                                        ==
 -- ==  Four queries together cover the full surface:                         ==
 -- ==                                                                        ==
 -- ==  (1) Direct calls to risky tooltip builders                            ==
--- ==      pattern: TaskPOI_OnEnter | AreaPoiUtil.TryShowTooltip            ==
--- ==             | GameTooltip_AddWidgetSet | GameTooltip_AddQuestRewards- ==
--- ==             ToTooltip | EmbeddedItemTooltip_ | SetTooltipMoney        ==
+-- ==      pattern: TaskPOI_OnEnter | AreaPoiUtil.TryShowTooltip             ==
+-- ==             | GameTooltip_AddWidgetSet | GameTooltip_AddQuestRewards-  ==
+-- ==             ToTooltip | EmbeddedItemTooltip_ | SetTooltipMoney         ==
 -- ==                                                                        ==
--- ==  (2) Templates inheriting OnMouseEnter from a covered template via    ==
+-- ==  (2) Templates inheriting OnMouseEnter from a covered template via     ==
 -- ==      XML or via CreateSubPin / CreateFromMixins:                       ==
 -- ==      pattern: CreateSubPin | inherits=".*PinTemplate"                  ==
--- ==             | CreateFromMixins\((WorldQuest|BonusObjective|AreaPOI|   ==
+-- ==             | CreateFromMixins\((WorldQuest|BonusObjective|AreaPOI|    ==
 -- ==               QuestOffer|Invasion|Vignette|QuestBlob)PinMixin\)        ==
 -- ==      Then cross-reference each hit against the covered mixins above.   ==
 -- ==                                                                        ==
--- ==  (3) Templates that delegate to a covered OnMouseEnter via a live     ==
+-- ==  (3) Templates that delegate to a covered OnMouseEnter via a live      ==
 -- ==      table lookup inside their own OnMouseEnter body:                  ==
 -- ==      pattern: \.OnMouseEnter\(self\)                                   ==
 -- ==      Cross-reference the target mixin against the covered list.        ==
 -- ==                                                                        ==
--- ==  (4) All GetPinTemplate return values ACROSS every audited folder:    ==
--- ==      pattern: return "([A-Za-z_]+PinTemplate)"                        ==
--- ==      Every template name that appears here MUST match one of the     ==
--- ==      dispatch branches in PatchPinForCustomTooltip. If a template     ==
--- ==      isn't matched but its mixin chain uses a covered mixin, add it   ==
--- ==      to the appropriate branch. Silent misses live here.              ==
+-- ==  (4) All GetPinTemplate return values ACROSS every audited folder:     ==
+-- ==      pattern: return "([A-Za-z_]+PinTemplate)"                         ==
+-- ==      Every template name that appears here MUST match one of the       ==
+-- ==      dispatch branches in PatchPinForCustomTooltip. If a template      ==
+-- ==      isn't matched but its mixin chain uses a covered mixin, add it    ==
+-- ==      to the appropriate branch. Silent misses live here.               ==
 -- ==                                                                        ==
 -- ==  Negative-result reference: BaseMapPoiPinMixin:OnMouseEnter (Shared-   ==
--- ==  MapPoiTemplates.lua:163) calls only CheckShowTooltip, which uses     ==
--- ==  GameTooltip_SetTitle / AddNormalLine / AddInstructionLine -- pure    ==
--- ==  text, no measured widgets, no secret-number trap. So every template ==
--- ==  whose only OnMouseEnter source is BaseMapPoiPinMixin:CreateSubPin    ==
+-- ==  MapPoiTemplates.lua:163) calls only CheckShowTooltip, which uses      ==
+-- ==  GameTooltip_SetTitle / AddNormalLine / AddInstructionLine -- pure     ==
+-- ==  text, no measured widgets, no secret-number trap. So every template   ==
+-- ==  whose only OnMouseEnter source is BaseMapPoiPinMixin:CreateSubPin     ==
 -- ==  is safe to skip.                                                      ==
 -- ==                                                                        ==
 -- ============================================================================
@@ -703,6 +704,8 @@ do
 end
 
 
+
+
 -- DebugLog: small helper to consolidate the diagnostic chat-print boilerplate
 -- that would otherwise be repeated in every PWM_*_OnMouseEnter handler.
 local function DebugLog(fmt, ...)
@@ -712,9 +715,9 @@ local function DebugLog(fmt, ...)
 end
 
 
--- Shared OnMouseLeave for pin types whose only cleanup is hiding our tooltip.
--- (WorldQuest, Vignette, and AreaPOI need extra cleanup -- they have their
--- own handlers below.)
+-- Shared OnMouseLeave for pin types whose only cleanup is hiding our
+-- tooltip. Pins that need extra cleanup or an owner-check guard
+-- (WorldQuest, Vignette, AreaPOI, QuestBlob) define their own below.
 local function PWM_OnMouseLeave_HideOnly(self)
   PWMTooltip:Hide()
 end
@@ -1245,13 +1248,35 @@ end
 
 
 -- ----------------------------------------------------------------------------
--- COPY OF: QuestBlobDataProvider.lua :: QuestBlobPinMixin:UpdateTooltip / :OnMouseEnter
--- Source lines: 182-229 (UpdateTooltip), 231-233 (OnMouseEnter)
--- Adaptation: GameTooltip -> local tooltip = PWMTooltip;
--- TaskPOI_OnEnter -> PWM_TaskPOI_OnEnter;
--- GameTooltip:GetOwner() -> tooltip:GetOwner().
--- We also assign pin.UpdateTooltip to our PWM version in the dispatch so
--- other callers (cursor updates etc.) route through PWMTooltip too.
+-- COPY OF: QuestBlobDataProvider.lua :: QuestBlobPinMixin:UpdateTooltip / :OnMouseEnter / :OnMouseLeave
+-- Source lines: 182-229 (UpdateTooltip), 231-233 (OnMouseEnter), 235-239 (OnMouseLeave)
+--
+-- Adaptations from Blizzard's source:
+--   * GameTooltip -> local tooltip = PWMTooltip everywhere the blob writes.
+--   * GameTooltip:GetOwner() -> tooltip:GetOwner() for the "another pin
+--     already owns the tooltip" deferral check.
+--   * TaskPOI_OnEnter -> PWM_TaskPOI_OnEnter for the threat-quest branch.
+--   * OnMouseEnter wraps UpdateTooltip in a DebugLog line (matches the
+--     pattern the other PWM_*_OnMouseEnter handlers use).
+--   * OnMouseLeave keeps its `owner == self` guard. This is LOAD-BEARING:
+--     UpdateTooltip calls self:OnMouseLeave() every frame when the cursor
+--     isn't over a quest area, and without the guard any patched pin's
+--     tooltip currently on PWMTooltip would be wiped by the blob's
+--     OnUpdate. That's why QuestBlob can't share PWM_OnMouseLeave_HideOnly.
+--
+-- Not in Blizzard's source (PWM-specific addition inside UpdateTooltip):
+--   * A second deferral check against GameTooltip:GetOwner(). Blizzard's
+--     one check on GameTooltip alone was sufficient because every vanilla
+--     pin uses GameTooltip. PWM splits tooltips across two frames --
+--     patched pins on PWMTooltip (caught by the first check), unpatched
+--     pins (dungeon entrance, quest pin, content tracking, ...) still on
+--     GameTooltip. Without the second check the blob's PWMTooltip would
+--     render on top of the pin's GameTooltip whenever the cursor is on
+--     such a pin inside the blob region.
+--
+-- pin.UpdateTooltip is assigned to PWM_QuestBlobPin_UpdateTooltip via the
+-- dispatch below, so callers other than OnMouseEnter (OnUpdate cursor
+-- tracking, etc.) also route through PWMTooltip.
 -- ----------------------------------------------------------------------------
 local function PWM_QuestBlobPin_UpdateTooltip(self)
   if POIButtonHighlightManager:HasHighlight() then
@@ -1269,6 +1294,14 @@ local function PWM_QuestBlobPin_UpdateTooltip(self)
   local tooltip = PWMTooltip  -- ADAPTED
   local tooltipOwner = tooltip:GetOwner()  -- ADAPTED
   if tooltipOwner and tooltipOwner ~= self then
+    return
+  end
+
+  -- ADDED: also defer to any pin currently owning GameTooltip -- see the
+  -- COPY OF header above.
+  local gtOwner = GameTooltip:GetOwner()
+  if gtOwner and gtOwner ~= self and GameTooltip:IsShown() then
+    if tooltip:IsShown() then tooltip:Hide() end
     return
   end
 
@@ -1307,6 +1340,12 @@ local function PWM_QuestBlobPin_OnMouseEnter(self)
   DebugLog("QuestBlob hover: pinTemplate=%s",
     tostring(self.pinTemplate or "?"))
   PWM_QuestBlobPin_UpdateTooltip(self)
+end
+
+local function PWM_QuestBlobPin_OnMouseLeave(self)
+  if PWMTooltip:GetOwner() == self then
+    PWMTooltip:Hide()
+  end
 end
 
 
@@ -1403,11 +1442,13 @@ local function PatchPinForCustomTooltip(pin, pinTemplate)
     pin.OnMouseLeave = PWM_VignettePin_OnMouseLeave
 
   elseif pinTemplate == "QuestBlobPinTemplate" then
-    -- QuestBlob exposes a public UpdateTooltip invoked separately from
-    -- OnMouseEnter (cursor tracking). Override that too so every entry
-    -- point routes through PWMTooltip.
+    -- Three fields to patch instead of two: pin.UpdateTooltip is public and
+    -- gets called from OnUpdate cursor tracking, so it must route through
+    -- PWMTooltip too. See the QuestBlobPin COPY OF block above for the full
+    -- rationale, including why OnMouseLeave uses its own owner-check
+    -- variant instead of the shared PWM_OnMouseLeave_HideOnly.
     pin.OnMouseEnter = PWM_QuestBlobPin_OnMouseEnter
-    pin.OnMouseLeave = PWM_OnMouseLeave_HideOnly
+    pin.OnMouseLeave = PWM_QuestBlobPin_OnMouseLeave
     pin.UpdateTooltip = PWM_QuestBlobPin_UpdateTooltip
 
   else
@@ -1518,6 +1559,24 @@ do
     -- Wrap pools that already exist on this canvas (if any).
     for pinTemplate, pool in pairs(canvas.pinPools) do
       WrapPoolAcquire(pool, pinTemplate)
+    end
+
+    -- QuestBlobPin is acquired ONCE at data-provider registration time
+    -- (before our addon loads) and never released -- QuestBlobDataProvider-
+    -- Mixin:OnAdded calls this out as "a single permanent pin". Since it
+    -- never comes back through Acquire, the pool wrapper above catches
+    -- nothing for it. Patch it directly. No SetScript needed: QuestBlobPin
+    -- drives its tooltip from OnUpdate via self:UpdateTooltip() (see
+    -- QuestBlobDataProvider.lua:114-121), which resolves the method
+    -- dynamically on the pin instance each call, so writing the field via
+    -- PatchPin -> PatchPinForCustomTooltip is enough.
+    local blobPool = canvas.pinPools["QuestBlobPinTemplate"]
+    if blobPool then
+      for pin in blobPool:EnumerateActive() do
+        if not pin.pwm_custom_tooltip_patched then
+          PatchPin(pin, "QuestBlobPinTemplate")
+        end
+      end
     end
 
     -- Catch future pool creation via a __newindex on the pinPools table.
