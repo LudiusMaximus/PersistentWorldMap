@@ -723,6 +723,40 @@ local function PWM_OnMouseLeave_HideOnly(self)
 end
 
 
+-- ----------------------------------------------------------------------------
+-- PWMTooltip cross-frame lifecycle hooks
+-- ----------------------------------------------------------------------------
+-- Cleanup handlers that fire from events NOT driven by our own pin handlers:
+-- map close, and another tooltip frame becoming visible. The pin-side
+-- OnMouseEnter / OnMouseLeave handlers below cover the normal hover path.
+
+
+-- Hide PWMTooltip when the map closes. Without this, closing the map via
+-- hotkey while a pin tooltip is visible leaves the tooltip stuck to the
+-- cursor (OnMouseLeave never fires because the mouse never physically left
+-- the pin -- the pin was hidden underneath it). PWMTooltip is parented to
+-- UIParent, not WorldMapFrame, so it doesn't inherit the hide.
+WorldMapFrame:HookScript("OnHide", function()
+  PWMTooltip:Hide()
+end)
+
+
+-- Hide PWMTooltip atomically when GameTooltip becomes visible on a QuestBlob
+-- region (via an unpatched pin like OccupiedPlotPinTemplate). Without this
+-- the QuestBlobPin_UpdateTooltip's gtOwner deferral only kicks in on the
+-- NEXT OnUpdate frame, leaving a one-frame visual overlap of the blob's
+-- PWMTooltip and the pin's GameTooltip. Blob-side deferral remains as the
+-- steady-state guard; this hook just closes the transition-frame gap.
+GameTooltip:HookScript("OnShow", function()
+  if PWMTooltip:IsShown() then
+    local o = PWMTooltip:GetOwner()
+    if o and o.pinTemplate == "QuestBlobPinTemplate" then
+      PWMTooltip:Hide()
+    end
+  end
+end)
+
+
 -- ============================================================================
 -- ====  BLIZZARD-SOURCE COPIES  --  AUDIT ON EVERY RETAIL PATCH  =============
 -- ============================================================================
@@ -1264,20 +1298,61 @@ end
 --     tooltip currently on PWMTooltip would be wiped by the blob's
 --     OnUpdate. That's why QuestBlob can't share PWM_OnMouseLeave_HideOnly.
 --
--- Not in Blizzard's source (PWM-specific addition inside UpdateTooltip):
---   * A second deferral check against GameTooltip:GetOwner(). Blizzard's
---     one check on GameTooltip alone was sufficient because every vanilla
---     pin uses GameTooltip. PWM splits tooltips across two frames --
---     patched pins on PWMTooltip (caught by the first check), unpatched
---     pins (dungeon entrance, quest pin, content tracking, ...) still on
---     GameTooltip. Without the second check the blob's PWMTooltip would
---     render on top of the pin's GameTooltip whenever the cursor is on
---     such a pin inside the blob region.
+-- Not in Blizzard's source (PWM-specific additions inside UpdateTooltip):
+--   * A second deferral check against GameTooltip. Blizzard's one check on
+--     GameTooltip alone was sufficient because every stock pin uses
+--     GameTooltip. PWM splits tooltips across two frames -- patched pins
+--     on PWMTooltip (caught by the first check), unpatched pins (dungeon
+--     entrance, quest pin, content tracking, ...) still on GameTooltip.
+--     Without the second check the blob's PWMTooltip would render on top
+--     of the pin's GameTooltip whenever the cursor is on such a pin
+--     inside the blob region.
+--   * Both deferral checks go through PWM_ShouldDeferToTooltip, which
+--     only defers when the other tooltip is ACTIVELY displayed for
+--     something the cursor is still on. A plain "owner ~= self" check
+--     (as Blizzard uses) defers indefinitely to a stale-owner tooltip,
+--     because neither Hide() nor FadeOut() clears GetOwner() -- for the
+--     FadeOut() case (unit frames) that's the full fade duration (several
+--     seconds -- this is the visible "blob tooltip is delayed" quirk in
+--     the stock Blizzard map), for a PWMTooltip owned by a previously-
+--     hovered patched pin that's forever until something else calls
+--     SetOwner, and for a UIParent-anchored world tooltip that's both
+--     the pre-fade linger AND the fade combined. See PWM_ShouldDeferTo-
+--     Tooltip's own header for the complete rule set and per-flavor
+--     rationale.
 --
 -- pin.UpdateTooltip is assigned to PWM_QuestBlobPin_UpdateTooltip via the
 -- dispatch below, so callers other than OnMouseEnter (OnUpdate cursor
 -- tracking, etc.) also route through PWMTooltip.
 -- ----------------------------------------------------------------------------
+-- Should the blob defer to `tt` (already displaying something owned by
+-- another frame)? Yes only if the other tooltip is ACTIVELY, LEGITIMATELY
+-- displayed for something the cursor is still on. Rules out, in order:
+--   * no owner, or owner is the blob itself -- nothing to defer to;
+--   * not shown -- stale owner from Hide() (neither Hide() nor FadeOut()
+--     clears GetOwner());
+--   * alpha < 1 -- fading out, will complete on its own;
+--   * owner == UIParent -- screen-anchored floating tooltip (world-unit
+--     hover, world-object hover, cinematic text, ...). Lingers at alpha=1
+--     for a while after the cursor leaves the source before the fade even
+--     starts. The blob's UpdateTooltip only runs when cursor is over the
+--     map, and UIParent is a screen-covering anchor frame with no direct
+--     relationship to any specific point the cursor is on, so any such
+--     tooltip is by definition stale from the blob's perspective;
+--   * owner:IsMouseOver()==false -- frame-anchored owner (PlayerFrame etc.)
+--     that the cursor has left; catches the linger period for those too.
+-- Together these fix Blizzard's "delayed blob tooltip after hovering
+-- another tooltip source" quirk in every flavor observed so far.
+local function PWM_ShouldDeferToTooltip(tt, ownerSelf)
+  local owner = tt:GetOwner()
+  if not owner or owner == ownerSelf then return false end
+  if not tt:IsShown() then return false end
+  if tt:GetAlpha() < 1 then return false end
+  if owner == UIParent then return false end
+  if owner.IsMouseOver and not owner:IsMouseOver() then return false end
+  return true
+end
+
 local function PWM_QuestBlobPin_UpdateTooltip(self)
   if POIButtonHighlightManager:HasHighlight() then
     return
@@ -1291,16 +1366,17 @@ local function PWM_QuestBlobPin_UpdateTooltip(self)
     return
   end
 
+  -- Both owner-deferral checks below go through PWM_ShouldDeferToTooltip
+  -- so they skip stale / fading / floating bindings -- see the COPY OF
+  -- header above.
   local tooltip = PWMTooltip  -- ADAPTED
-  local tooltipOwner = tooltip:GetOwner()  -- ADAPTED
-  if tooltipOwner and tooltipOwner ~= self then
+  if PWM_ShouldDeferToTooltip(tooltip, self) then
     return
   end
 
   -- ADDED: also defer to any pin currently owning GameTooltip -- see the
   -- COPY OF header above.
-  local gtOwner = GameTooltip:GetOwner()
-  if gtOwner and gtOwner ~= self and GameTooltip:IsShown() then
+  if PWM_ShouldDeferToTooltip(GameTooltip, self) then
     if tooltip:IsShown() then tooltip:Hide() end
     return
   end
