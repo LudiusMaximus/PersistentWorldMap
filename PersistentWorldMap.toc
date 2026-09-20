@@ -3,13 +3,40 @@
 ## Title: Persistent World Map
 ## IconTexture: interface/icons/inv_misc_map08.blp
 ## Author: LudiusMaximus
+
 ## Notes: Maintains the World Map's current zoom and pan when closing and reopening it. And more...
+## Notes-deDE: Behält die aktuelle Zoomstufe und Position der Weltkarte beim Schließen und erneuten Öffnen bei. Und mehr...
+## Notes-esES: Mantiene el zoom y el desplazamiento actuales del mapa del mundo al cerrarlo y volver a abrirlo. Y más...
+## Notes-esMX: Mantiene el zoom y el desplazamiento actuales del mapa del mundo al cerrarlo y volver a abrirlo. Y más...
+## Notes-frFR: Conserve le zoom et la position actuels de la carte du monde lors de sa fermeture et de sa réouverture. Et plus encore...
+## Notes-itIT: Mantiene lo zoom e la posizione attuali della mappa del mondo quando viene chiusa e riaperta. E altro ancora...
+## Notes-koKR: 세계 지도를 닫았다가 다시 열 때 현재 확대/축소 및 이동 상태를 유지합니다. 그 외 다양한 기능...
+## Notes-ptBR: Mantém o zoom e a posição atuais do mapa-múndi ao fechá-lo e reabri-lo. E mais...
+## Notes-ruRU: Сохраняет текущий масштаб и положение карты мира при ее закрытии и повторном открытии. И многое другое...
+## Notes-zhCN: 在关闭并重新打开世界地图时，保持当前的缩放和平移位置。还有更多功能……
+## Notes-zhTW: 在關閉並重新打開世界地圖時，保持目前的縮放和平移位置。還有更多功能……
+
+## Category: Map
+## Category-deDE: Karte
+## Category-esES: Mapa
+## Category-esMX: Mapa
+## Category-frFR: Carte
+## Category-itIT: Mappa
+## Category-koKR: 지도
+## Category-ptBR: Mapa
+## Category-ruRU: Карта
+## Category-zhCN: 地图
+## Category-zhTW: 地圖
+
 ## SavedVariables: PWM_config
+
 ## X-Curse-Project-ID: 360039
 ## X-WoWI-ID: 25499
 ## X-Wago-ID: EGPX1jG1
+
 ## X-Donate: PayPal:ludiusmaximus@gmail.com
 ## X-License: The MIT License (MIT)
+
 
 embeds.xml
 RecenterButtonTemplate.xml
