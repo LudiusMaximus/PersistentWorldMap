@@ -23,7 +23,7 @@ local folderName, Addon = ...
 --        On entering any instance (BG, arena, 5-man, raid, scenario),
 --        SetScript WorldMapFrame:OnShow to a manually-inlined copy of
 --        WorldMapMixin:OnShow with the C_ChatInfo.PerformEmote("READ", ...)
---        line at Blizzard_WorldMap.lua:352 omitted. On leaving, restore
+--        line at Blizzard_WorldMap.lua:359 omitted. On leaving, restore
 --        the raw Blizzard handler. This has a patch-day maintenance cost
 --        -- diff Blizzard's OnShow against the local copy every retail
 --        patch. Also installs the reading-emote opt-out HookScript
@@ -94,10 +94,10 @@ local folderName, Addon = ...
 -- ----------------------------------------------------------------------------
 --
 --   Blizzard source:  Blizzard_WorldMap/Blizzard_WorldMap.lua
---   Blizzard symbol:  WorldMapMixin:OnShow           (lines 342-376 as of 12.1.0)
+--   Blizzard symbol:  WorldMapMixin:OnShow           (lines 342-376 as of 12.1.5)
 --   Our copy:         local function InstanceOnShow(self) in section (2).
 --   Deviation:        omit the C_ChatInfo.PerformEmote("READ", nil, true)
---                     call at line :352. Every other line must match.
+--                     call at line :359. Every other line must match.
 --
 --   Procedure:
 --     1. Open the Blizzard source at the cited symbol.
@@ -175,7 +175,7 @@ local folderName, Addon = ...
 --     being correct for its "fresh vs reused pin" branching.
 --
 --   * Blizzard_GameTooltip/Mainline/GameTooltip.xml -- the ItemTooltip
---     child of the canonical GameTooltip (lines 249-274 as of 12.0.5).
+--     child of the canonical GameTooltip (lines 249-274 as of 12.1.5).
 --     Section (5)'s PWMTooltip manually creates an
 --     InternalEmbeddedItemTooltipTemplate child to mirror this; if
 --     Blizzard restructures the tooltip template composition, the manual
@@ -245,7 +245,7 @@ end
 -- CURRENT APPROACH:
 --
 -- The error stems from OnShow's `C_ChatInfo.PerformEmote("READ", ...)` at
--- Blizzard_WorldMap.lua:352 reaching a protected C downstream when
+-- Blizzard_WorldMap.lua:359 reaching a protected C downstream when
 -- OnShow's execution has any PWM taint. Since PWM-taint on WorldMapFrame
 -- .mapID is inevitable during normal use (writing to mapID is PWM's
 -- reason to exist), we must stop the emote line from being called at all
@@ -256,7 +256,7 @@ end
 --   * On entering an instance (PLAYER_ENTERING_WORLD), SetScript
 --     WorldMapFrame's OnShow to InstanceOnShow: a MANUALLY-INLINED copy
 --     of Blizzard's WorldMapMixin:OnShow (Blizzard_WorldMap.lua:342-376)
---     with the C_ChatInfo.PerformEmote line at :352 omitted. The emote
+--     with the C_ChatInfo.PerformEmote line at :359 omitted. The emote
 --     never fires while in an instance, so no protected downstream is
 --     reached.
 --   * On leaving an instance, SetScript back to the raw Blizzard handler
@@ -331,10 +331,10 @@ do
 
   -- ------------------------------------------------------------------------
   -- MANUAL COPY of WorldMapMixin:OnShow (Blizzard_WorldMap.lua:342-376).
-  -- Last synced 2026-08-04 vs Midnight 12.1.0. See PATCH-DAY MANUAL,
+  -- Last synced 2026-10-15 vs Midnight 12.1.5. See PATCH-DAY MANUAL,
   -- Audit (A) at top of file for the sync procedure.
   -- Deviation from source: the C_ChatInfo.PerformEmote("READ", nil, true)
-  -- call at line :352 is intentionally OMITTED here.
+  -- call at line :359 is intentionally OMITTED here.
   -- ------------------------------------------------------------------------
   local function InstanceOnShow(self)
     if self.needUpdateDisplayState then
@@ -516,7 +516,7 @@ end
 -- ==  PWM copy here and mirror any change. If you skip this audit,          ==
 -- ==  tooltip content silently diverges from Blizzard's intent.             ==
 -- ==                                                                        ==
--- ==  AUDIT CHECKLIST  (last audited: 2026-08-04 vs Midnight 12.1.0)        ==
+-- ==  AUDIT CHECKLIST  (last audited: 2026-10-15 vs Midnight 12.1.5)        ==
 -- ==                                                                        ==
 -- ==    Blizzard_FrameXMLUtil/AreaPoiUtil.lua                               ==
 -- ==        AreaPoiUtil.TryShowTooltip                lines 3-72            ==
@@ -1832,8 +1832,9 @@ local function CloseWorldMapFrame(orReset)
 
   if InCombatLockdown() then
     -- WorldMapFrame:Hide() will leave WorldMapFrame in UIParent's
-    -- FramePositionDelegate (see Blizzard_UIParentPanelManager/Mainline
-    -- /UIParentPanelManager.lua L871), which then breaks ToggleGameMenu.
+    -- FramePositionDelegate (see Blizzard_UIParentPanelManager/Shared
+    -- /UIParentPanelManager.lua :: HideUIPanel), which then breaks
+    -- ToggleGameMenu.
     -- Only hide if WorldMapFrame is not in UIPanelWindows (e.g. Mapster
     -- removes it from UIPanelWindows, in which case hiding is safe).
     if not UIPanelWindows["WorldMapFrame"] then
