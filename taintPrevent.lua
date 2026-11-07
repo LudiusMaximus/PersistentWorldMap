@@ -62,7 +62,8 @@ local folderName, Addon = ...
 --
 --    (8) Quest tracker hooks
 --        QuestMapFrame_OpenToQuestDetails and QuestLogPopupDetailFrame_Show
---        don't bring up the right frames during combat -- we do it manually.
+--        (QuestLogPopupDetailFrame:ShowQuest on WoW Forever) don't bring up
+--        the right frames during combat -- we do it manually.
 --
 --    (9) Frame mutual-exclusion helpers
 --        Close-X functions that respect combat lockdown.
@@ -88,6 +89,23 @@ local folderName, Addon = ...
 -- Skipping any of them lets a Blizzard change silently break PWM: either the
 -- taint dam fails and errors surface, or our copy of Blizzard code diverges
 -- from the current behavior and features silently regress.
+--
+-- Line numbers in this manual refer to the retail (wow-ui-source `live`)
+-- sources.
+--
+-- WoW Forever: PWM also loads there (Interface 16001). Its UI is built on
+-- the retail code (wow-ui-source branch `forever`), so the same audits
+-- apply on a Forever patch, run against that branch. Last checked
+-- 2026-11-07 vs Forever 1.60.1 (70862). Known Forever deviations PWM
+-- handles:
+--   * No Encounter Journal (Blizzard_EncounterJournal does not load there):
+--     sections (7), (9) and (10) skip everything EncounterJournal-related.
+--   * QuestLogPopupDetailFrame_Show is the QuestLogPopupDetailFrame
+--     :ShowQuest method instead: section (8) hooks whichever exists.
+--   * QuestBlobPinMixin:UpdateTooltip anchors differently in gamepad UI
+--     mode: mirrored in section (5)'s copy.
+-- Everything else in Forever's map code that differs from retail is
+-- gamepad UI additions that PWM does not touch.
 --
 -- ----------------------------------------------------------------------------
 -- AUDIT (A) -- Section (2)'s InstanceOnShow copy of WorldMapMixin:OnShow
@@ -599,6 +617,8 @@ end
 -- ==        QuestBlobPinMixin:UpdateTooltip           lines 182-229         ==
 -- ==        QuestBlobPinMixin:OnMouseEnter            lines 231-233         ==
 -- ==        QuestBlobPinMixin:OnMouseLeave            lines 235-239         ==
+-- ==        (WoW Forever: UpdateTooltip picks a different SetOwner anchor   ==
+-- ==         in gamepad UI mode; mirrored, see the COPY OF header.)         ==
 -- ==                                                                        ==
 -- ==  Reference points (no copies, but our code relies on these line        ==
 -- ==  numbers being correct -- spot-check on patch days):                   ==
@@ -1287,6 +1307,10 @@ end
 --
 -- Adaptations from Blizzard's source:
 --   * GameTooltip -> local tooltip = PWMTooltip everywhere the blob writes.
+--   * SetOwner anchor: WoW Forever's UpdateTooltip uses ANCHOR_RIGHT instead
+--     of ANCHOR_CURSOR_RIGHT unless InputUtil.IsMKBUIEnabled() (i.e. in its
+--     gamepad UI mode). The copy mirrors that and falls back to the cursor
+--     anchor where InputUtil.IsMKBUIEnabled does not exist (retail).
 --   * GameTooltip:GetOwner() -> tooltip:GetOwner() for the "another pin
 --     already owns the tooltip" deferral check.
 --   * TaskPOI_OnEnter -> PWM_TaskPOI_OnEnter for the threat-quest branch.
@@ -1381,7 +1405,9 @@ local function PWM_QuestBlobPin_UpdateTooltip(self)
     return
   end
 
-  tooltip:SetOwner(self, "ANCHOR_CURSOR_RIGHT", 5, 2)
+  -- ADAPTED: see the COPY OF header above.
+  local cursorAnchor = not InputUtil.IsMKBUIEnabled or InputUtil.IsMKBUIEnabled()
+  tooltip:SetOwner(self, cursorAnchor and "ANCHOR_CURSOR_RIGHT" or "ANCHOR_RIGHT", 5, 2)
 
   local title = C_QuestLog.GetTitleForQuestID(questID)
   local numObjectives = GetNumQuestLeaderBoards(questLogIndex)
@@ -1698,7 +1724,12 @@ end
 -- emulate their behavior manually. Called from restoreAndReset.lua's
 -- hooksecurefunc on WorldMapFrame.SetMapID and .RefreshAllDataProviders.
 --
+-- Skipped while there is no EncounterJournal frame. On WoW Forever there
+-- never is (no Encounter Journal, no EncounterJournalPinTemplate), so there
+-- is nothing to emulate.
+--
 Addon.HookPins = function()
+  if not EncounterJournal then return end
   if not WorldMapFrame.ScrollContainer.Child then return end
 
   local kids = { WorldMapFrame.ScrollContainer.Child:GetChildren() }
@@ -1784,29 +1815,32 @@ hooksecurefunc("QuestMapFrame_OpenToQuestDetails", function(...)
 end)
 
 
--- QuestLogPopupDetailFrame_Show is called when right-clicking a quest
--- tracker entry and selecting "Open Quest Details". During combat it
+-- QuestLogPopupDetailFrame_Show(questID) is called when right-clicking a
+-- quest tracker entry and selecting "Open Quest Details". During combat it
 -- doesn't bring up the frame, so we do it manually. Also handle the
--- toggle-off case: if the user clicks the same quest a second time,
+-- toggle-off case: if the user clicks the quest that is already shown,
 -- hide the frame.
 --
+-- WoW Forever has no QuestLogPopupDetailFrame_Show global; the same code
+-- lives in the QuestLogPopupDetailFrame:ShowQuest(questID) method instead.
+--
 do
+  -- The quest the frame showed when the last call finished, nil while hidden.
   local lastShownQuestID = nil
-  QuestLogPopupDetailFrame:HookScript("OnShow", function(self)
-    lastShownQuestID = self.questID
-  end)
-  QuestLogPopupDetailFrame:HookScript("OnHide", function(self)
+  QuestLogPopupDetailFrame:HookScript("OnHide", function()
     lastShownQuestID = nil
   end)
 
-  hooksecurefunc("QuestLogPopupDetailFrame_Show", function(questLogIndex)
+  local function AfterShowQuestDetails(questID)
     if InCombatLockdown() then
-      local questID = C_QuestLog.GetQuestIDForLogIndex(questLogIndex)
-
-      if lastShownQuestID and lastShownQuestID == questID then
+      -- Blizzard's toggle-off HideUIPanel did not get through.
+      if lastShownQuestID == questID then
         QuestLogPopupDetailFrame:Hide()
         return
       end
+
+      -- Blizzard's toggle-off did get through (its OnHide clears questID).
+      if QuestLogPopupDetailFrame.questID ~= questID then return end
 
       if not QuestLogPopupDetailFrame:IsShown() then
         QuestLogPopupDetailFrame:Show()
@@ -1814,7 +1848,17 @@ do
         QuestLogPopupDetailFrame:Raise()
       end
     end
-  end)
+
+    lastShownQuestID = QuestLogPopupDetailFrame:IsShown() and questID or nil
+  end
+
+  if QuestLogPopupDetailFrame_Show then
+    hooksecurefunc("QuestLogPopupDetailFrame_Show", AfterShowQuestDetails)
+  else
+    hooksecurefunc(QuestLogPopupDetailFrame, "ShowQuest", function(_, questID)
+      AfterShowQuestDetails(questID)
+    end)
+  end
 end
 
 
@@ -1852,7 +1896,7 @@ local function CloseWorldMapFrame(orReset)
 end
 
 local function CloseEncounterJournal()
-  if not EncounterJournal:IsShown() then return end
+  if not EncounterJournal or not EncounterJournal:IsShown() then return end
   if InCombatLockdown() then
     EncounterJournal:Hide()
   else
@@ -1881,12 +1925,16 @@ end
 --   * Install mutual-exclusion HookScripts (open one of the three frames =>
 --     close the others) plus the OpenWorldMap raise hook.
 --
+-- WoW Forever has no Encounter Journal (Blizzard_EncounterJournal does not
+-- load there, so EncounterJournal and EncounterJournal_LoadUI are nil).
+-- Everything EncounterJournal-related is skipped then.
+--
 do
   local startupFrame = CreateFrame("Frame")
   startupFrame:RegisterEvent("PLAYER_LOGIN")
   startupFrame:SetScript("OnEvent", function()
 
-    if not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
+    if EncounterJournal_LoadUI and not C_AddOns.IsAddOnLoaded("Blizzard_EncounterJournal") then
       EncounterJournal_LoadUI()
     end
 
@@ -1894,21 +1942,26 @@ do
     -- frame:Show() (used during combat to bypass HideUIPanel restrictions)
     -- can leave them off-screen.
     WorldMapFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
-    EncounterJournal:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
     QuestLogPopupDetailFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
 
     -- Make ESC work for these frames even during combat.
     tinsert(UISpecialFrames, "WorldMapFrame")
-    tinsert(UISpecialFrames, "EncounterJournal")
     tinsert(UISpecialFrames, "QuestLogPopupDetailFrame")
+
+    if EncounterJournal then
+      EncounterJournal:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
+      tinsert(UISpecialFrames, "EncounterJournal")
+    end
 
     -- Mutual exclusion: opening any one of the three closes the other two.
     -- May be prevented by other addons.
     -- TODO: Make mutual exclusiveness optional!
-    EncounterJournal:HookScript("OnShow", function()
-      CloseWorldMapFrame()
-      CloseQuestLogPopupDetailFrame()
-    end)
+    if EncounterJournal then
+      EncounterJournal:HookScript("OnShow", function()
+        CloseWorldMapFrame()
+        CloseQuestLogPopupDetailFrame()
+      end)
+    end
 
     QuestLogPopupDetailFrame:HookScript("OnShow", function()
       CloseWorldMapFrame(true)
