@@ -1920,7 +1920,8 @@ end
 --
 -- One-shot setup that needs the UI to be ready:
 --   * Preload EncounterJournal (so boss-pin OnClick works in combat).
---   * Pre-anchor the three frames so the first Show() doesn't misplace them.
+--   * Pre-anchor the three frames so the first Show() doesn't misplace them
+--     (deferred to the end of combat after a /reload in combat).
 --   * Register UISpecialFrames so ESC can close them during combat.
 --   * Install mutual-exclusion HookScripts (open one of the three frames =>
 --     close the others) plus the OpenWorldMap raise hook.
@@ -1941,15 +1942,36 @@ do
     -- Bring frames into the right position once, otherwise the first
     -- frame:Show() (used during combat to bypass HideUIPanel restrictions)
     -- can leave them off-screen.
-    WorldMapFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
-    QuestLogPopupDetailFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
+    --
+    -- After a /reload in combat, PLAYER_LOGIN comes during combat lockdown,
+    -- where this SetPoint can be blocked ("SetPoint would result in anchor
+    -- family connection", seen on WoW Forever). Then it waits until combat
+    -- ends, and skips frames that have been opened (and thereby positioned)
+    -- in the meantime.
+    local function PreAnchorFrames()
+      local frames = { WorldMapFrame, QuestLogPopupDetailFrame, EncounterJournal }
+      for _, frame in pairs(frames) do
+        if not frame:IsShown() then
+          frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
+        end
+      end
+    end
+    if InCombatLockdown() then
+      local regenFrame = CreateFrame("Frame")
+      regenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+      regenFrame:SetScript("OnEvent", function(self)
+        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        PreAnchorFrames()
+      end)
+    else
+      PreAnchorFrames()
+    end
 
     -- Make ESC work for these frames even during combat.
     tinsert(UISpecialFrames, "WorldMapFrame")
     tinsert(UISpecialFrames, "QuestLogPopupDetailFrame")
 
     if EncounterJournal then
-      EncounterJournal:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -116)
       tinsert(UISpecialFrames, "EncounterJournal")
     end
 
