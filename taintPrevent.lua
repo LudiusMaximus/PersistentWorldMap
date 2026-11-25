@@ -13,6 +13,12 @@ local folderName, Addon = ...
 --  file is the workaround layer: defensive patches that keep PWM functional
 --  in the presence of its own permanent taint.
 --
+--  mapID is not the only source. Restoring the zoom (ScrollContainer
+--  :InstantPanAndZoom, called by PWM) taints the zoom and scroll fields the
+--  same way, and section (6)'s pool-acquire wrapper taints the setup of
+--  every map pin. Sections (11) and (12) cover the two symptoms of this
+--  that cannot be prevented.
+--
 --  Sections (each is a self-contained `do` block or labelled region):
 --
 --    (1) ADDON_ACTION_FORBIDDEN popup customization
@@ -72,6 +78,16 @@ local folderName, Addon = ...
 --         Preload EncounterJournal, fix initial frame anchors, register
 --         UISpecialFrames, install the mutual-exclusion HookScripts.
 --
+--    (11) Objective tracker secret-aura notice
+--         A PWM taint symptom we cannot prevent: once a tracker quest
+--         click carries the map's taint into the objective tracker, its
+--         aura check fails whenever auras are secret. Explain that in chat.
+--
+--    (12) WoW Forever Smart Navigation blocked-action notice
+--         Hovering map pins in combat refreshes the quest log, whose gamepad
+--         navigation markings Smart Navigation refuses under taint, printing
+--         "Interface action failed because of an AddOn". Explain that too.
+--
 -- ============================================================================
 -- ============================================================================
 --
@@ -104,6 +120,9 @@ local folderName, Addon = ...
 --     :ShowQuest method instead: section (8) hooks whichever exists.
 --   * QuestBlobPinMixin:UpdateTooltip anchors differently in gamepad UI
 --     mode: mirrored in section (5)'s copy.
+--   * Smart Navigation (Blizzard_GamepadSmartNavigation/SecureHelper.lua,
+--     since 1.60.1 build 70707) refuses tainted calls during combat and
+--     prints the "Interface action failed" message itself: section (12).
 -- Everything else in Forever's map code that differs from retail is
 -- gamepad UI additions that PWM does not touch.
 --
@@ -198,6 +217,12 @@ local folderName, Addon = ...
 --     InternalEmbeddedItemTooltipTemplate child to mirror this; if
 --     Blizzard restructures the tooltip template composition, the manual
 --     child creation may need to change.
+--
+--   * Sections (11) and (12) recognize their symptoms by Blizzard names:
+--     the engine error text, ObjectiveTrackerFrame.dirty (DirtiableMixin),
+--     the tracker modules' "state" field, DisplayInterfaceActionBlockedMessage,
+--     SmartNavigation_MarkFrameIgnored and QuestLogQuests_Update. If a
+--     symptom is back without its chat note, check whether these changed.
 --
 -- ============================================================================
 -- ============================================================================
@@ -1581,6 +1606,11 @@ end
 -- The pool-acquire wrapper ALSO calls PatchPinForCustomTooltip (defined in
 -- section (5)) to install the custom-tooltip handlers on the same pin.
 --
+-- Side effect: because AcquirePin calls our wrapper, the rest of every pin's
+-- setup runs tainted, even before PWM has restored any map or zoom. So pin
+-- hovers and clicks run tainted too. See section (12) for the one visible
+-- consequence, and why we accept it instead of dropping the wrapper.
+--
 -- pinTemplate is threaded through the wrappers explicitly because
 -- pin.pinTemplate isn't assigned until AFTER pool:Acquire returns (the
 -- assignment happens at MapCanvas.lua:259, AFTER our wrapper runs at :257).
@@ -2014,4 +2044,239 @@ do
     -- table.insert(UISpecialFrames, "WorldMapFrame")
 
   end)
+end
+
+
+-- ============================================================================
+-- (11) Objective tracker secret-aura notice
+-- ============================================================================
+--
+-- The error, as first seen on WoW Forever 1.60.1 at a level-up (it comes in
+-- two variants at the same moment, see "Detection" below):
+--   "GetAuraDataByIndex(): Auras cannot be accessed when secret while tainted
+--    by 'PersistentWorldMap'"
+-- The Blizzard code involved is identical on retail, so it can happen there
+-- too, whenever a tracker update meets secret auras.
+--
+-- How it comes about (line numbers: Forever 1.60.1 build 70888):
+--   1. PWM restoring the last map and zoom taints WorldMapFrame (see
+--      OVERVIEW). Restoring only the zoom is already enough:
+--      ScrollContainer:InstantPanAndZoom, called by PWM, writes currentScale,
+--      targetScale and the scroll positions tainted. Nothing cleans them
+--      again: the ScrollContainer's OnHide clears only the current* fields,
+--      CalculateScaleExtents re-clamps targetScale from its own old value,
+--      and MapCanvasMixin:SetMapID reads mapID before writing it.
+--   2. Clicking a quest in the objective tracker calls
+--      QuestMapFrame_OpenToQuestDetails, which first opens the quest log
+--      (OpenQuestLog -> QuestLogOwnerMixin:SetDisplayState). Somewhere in that
+--      map code (not pinned down further) the tainted map fields are read, so
+--      QuestMapFrame_ShowQuestDetails then writes
+--      QuestMapFrame.DetailsFrame.questID (and .returnMapID, .questMapID)
+--      tainted.
+--   3. Every quest row of the tracker reads that field
+--      (QuestObjectiveTrackerMixin:UpdateSingle ->
+--      QuestMapFrame_GetFocusedQuestID), so the tracker modules' next layout
+--      runs tainted. From then on, each module update reads the module's own
+--      tainted fields first (BeginLayout -> UpdateCachedOrderList reads
+--      firstBlock, IsDisplayable reads state), so the modules stay tainted
+--      until /reload. (ObjectiveTrackerFrame's own fields, like
+--      topModulePadding, stay clean: the taint enters in the module layout.)
+--   4. Every tracker update that lays out the scenario module (the first,
+--      display-priority module) runs its LayoutContents, which calls
+--      ShouldShowMawBuffs() (Blizzard_MawBuffs) ->
+--      C_UnitAuras.GetAuraDataByIndex("player", 1, "MAW"), even outside any
+--      scenario. Whenever auras are secret, that call fails under taint. On
+--      Forever it happened at a level-up: EDIT_MODE_LAYOUTS_UPDATED fired, and
+--      Edit Mode updated the tracker (EditModeObjectiveTrackerSystemMixin
+--      :OnAnyEditModeSystemAnchorChanged -> ObjectiveTrackerFrame:Update)
+--      while the player's auras were secret. The same moment also produced
+--      the thrown variant from the tracker's own deferred update.
+--
+-- Measured in-game on 2026-11-24, with a watcher that checked these fields
+-- with issecurevariable:
+--   * Test A: /reload, open and close the map without PWM restoring
+--     anything, click a tracker quest: tracker stays clean.
+--   * Test B: same, but let PWM restore only the zoom (mapID stays clean,
+--     ScrollContainer.currentScale tainted): tracker click taints
+--     DetailsFrame.questID and the tracker modules in the same second.
+--   * Ruled out: quest watch and super-track changes from addon code
+--     (/run C_QuestLog.AddQuestWatch, C_SuperTrack.SetSuperTrackedQuestID)
+--     leave the tracker clean, because the resulting events are dispatched
+--     clean. Clicking quest pins on the map leaves it clean too: that only
+--     taints map-side state the tracker never reads
+--     (POIButtonHighlightManager.questID, QuestMapFrame.layoutIndex).
+--   * Which addon gets blamed depends on who tainted the tracker: the same
+--     error pair was once blamed on Immersion.
+--
+-- This cannot be prevented:
+--   * The restore is PWM's core feature, and any restore from addon code
+--     taints these map fields.
+--   * A PWM replacement of ShouldShowMawBuffs or of other tracker code would
+--     taint the tracker from login on (calling addon code taints the caller),
+--     even in sessions without a tracker click. That is worse: the tracker's
+--     quest item buttons (QuestObjectiveItemButtonMixin:OnClick) call the
+--     protected UseQuestLogSpecialItem with a questLogIndex attribute set
+--     during the tracker's layout, so a tainted tracker can get them blocked
+--     in combat.
+--
+-- So we only explain it in chat, once per session, when it happens.
+--
+-- Detection:
+--   * As a LUA_WARNING (the tracker update ran inside a pcall, e.g. Edit Mode's
+--     anchor callbacks): caught via the LUA_WARNING event.
+--   * As a thrown error in the tracker's own deferred update. That cannot be
+--     caught without replacing the error handler (BugGrabber owns it). But
+--     DirtiableMixin only clears ObjectiveTrackerFrame.dirty after a successful
+--     update, so the flag stays true for good, and the tracker no longer
+--     updates by itself. A ticker watches for that. It requires PWM taint on a
+--     tracker module, so we don't claim other addons' tracker errors.
+--
+-- Listening to events and reading fields does not taint anything.
+--
+do
+  -- The client's C code produces this error text, always in English (no
+  -- GlobalString exists for it). Used for detection and, via %1$s, in the
+  -- notice, so translations of the notice leave it untouched.
+  local AURA_SECRET_ERROR = "Auras cannot be accessed when secret while tainted by '" .. folderName .. "'"
+
+  -- %1$s: AURA_SECRET_ERROR, as the user sees it in the error.
+  local NOTICE = "|cFF60FF60Persistent World Map:|r The error \"%1$s\" is a known side effect of PWM and unfortunately cannot be avoided. Restoring your last map and zoom taints the world map, and clicking a quest in the objective tracker passes this on to the tracker. A /reload clears it."
+  local NOTICE_STUCK = " Until then, the objective tracker may not update by itself."
+
+  local noticeShown = false
+  local checkTicker
+
+  local function ShowNotice(trackerStuck)
+    if noticeShown then return end
+    noticeShown = true
+    if checkTicker then
+      checkTicker:Cancel()
+      checkTicker = nil
+    end
+    print(NOTICE:format(AURA_SECRET_ERROR) .. (trackerStuck and NOTICE_STUCK or ""))
+  end
+
+  local warningFrame = CreateFrame("Frame")
+  warningFrame:RegisterEvent("LUA_WARNING")
+  warningFrame:SetScript("OnEvent", function(_, _, warningText)
+    if type(warningText) == "string"
+        and warningText:find(AURA_SECRET_ERROR, 1, true) then
+      ShowNotice(false)
+    end
+  end)
+
+  local function TrackerTaintedByPWM()
+    for _, module in ipairs(ObjectiveTrackerFrame.modules or {}) do
+      local isSecure, taintedBy = issecurevariable(module, "state")
+      if not isSecure and taintedBy == folderName then
+        return true
+      end
+    end
+    return false
+  end
+
+  -- A healthy tracker clears its dirty flag on the next frame, so seeing it
+  -- set on two consecutive checks means the deferred update failed.
+  local dirtyLastCheck = false
+  checkTicker = C_Timer.NewTicker(3, function()
+    if not ObjectiveTrackerFrame then return end
+    local dirty = ObjectiveTrackerFrame.dirty == true
+    if dirty and dirtyLastCheck and TrackerTaintedByPWM() then
+      ShowNotice(true)
+    end
+    dirtyLastCheck = dirty
+  end)
+end
+
+
+-- ============================================================================
+-- (12) WoW Forever Smart Navigation blocked-action notice
+-- ============================================================================
+--
+-- The message: "Interface action failed because of an AddOn" in chat, during
+-- combat, with no Lua error and no ADDON_ACTION_BLOCKED event (so BugGrabber
+-- records nothing). WoW Forever only: retail has no Smart Navigation.
+--
+-- How it comes about (line numbers: Forever 1.60.1 build 70888):
+--   1. Section (6) replaces each map pin pool's Acquire with a PWM function.
+--      When MapCanvasMixin:AcquirePin calls it, the rest of the pin's setup
+--      runs tainted, so every map pin is tainted, even in a fresh session in
+--      which PWM has not restored any map or zoom yet. (Seen in-game: hovering
+--      a quest pin right after /reload already writes
+--      POIButtonHighlightManager.questID tainted by PWM.) After a map or zoom
+--      restore, the whole map refresh is tainted anyway (see section (11)).
+--   2. Hovering a map pin runs its OnEnter / OnLeave handler, which reads the
+--      pin's tainted fields (and for pin types with section (5)'s custom
+--      tooltips is a PWM function anyway), so the hover runs tainted. The
+--      map's pin callbacks then call QuestLogScrollFrameMixin
+--      :OnMapCanvasPinEnter (QuestMapFrame.lua:1263) on entering and
+--      :OnMapCanvasPinLeave (:1269) on leaving, and both run
+--      QuestLogQuests_Update under that taint.
+--   3. For every quest in the list, QuestLogQuests_Update calls
+--      SmartNavigation_MarkFrameIgnored on the quest's checkbox (:1842) and
+--      POI button (:1949). That goes through SecureHelper:SetSecureValue
+--      (Blizzard_GamepadSmartNavigation/SecureHelper.lua), whose
+--      OnAttributeChanged handler refuses tainted calls while the combat
+--      AddOn restriction is active and calls DisplayInterfaceActionBlockedMessage.
+--
+-- Measured in-game on 2026-11-24: hovering a few pins in combat with the
+-- quest log side panel open gave 182 refused markings within two seconds,
+-- all from these two lines via these two hover handlers, nothing else.
+--
+-- History: until 1.60.1 build 70425, SmartNavigation_MarkFrameIgnored was a
+-- plain field write (inFrame.smartNavigationIgnored = true), which merely got
+-- tainted. Build 70707 added SecureHelper, and the quest log started marking
+-- the POI button too. That is when the message first appeared with PWM.
+--
+-- Effect:
+--   * Only Smart Navigation's markings of the quest log buttons are skipped,
+--     i.e. which buttons the gamepad cursor should ignore. Irrelevant with
+--     mouse and keyboard, and close to irrelevant with a gamepad: the
+--     marking is a flag on the button, a refused call leaves an existing
+--     flag alone, and the buttons are pooled and reused without clearing it.
+--     So only a button first created during combat lacks the flag, and the
+--     gamepad cursor could stop on it until the next refresh outside combat.
+--   * DisplayInterfaceActionBlockedMessage (Blizzard_ChatFrameBase/Mainline
+--     ChatFrameUtilOverrides.lua) prints only on its first call per session.
+--     The counter is shared with real ADDON_ACTION_BLOCKED events, so after
+--     this, a real blocked action later in the session shows no chat message.
+--
+-- Untested: with the gamepad UI on, Forever's map and tracker make more
+-- Smart Navigation calls of the same protected kind (e.g. WorldMapMixin
+-- :FocusQuests -> SmartNavigation:RefreshButtonGroups, ObjectiveTrackerFrame
+-- -> SmartNavigation:SetTargetButtonForFrame). If those run tainted in combat,
+-- they are refused too, possibly with a visible effect, and our note does not
+-- fire for them (it only matches the quest log markings).
+--
+-- This is not worth avoiding: rebuilding section (6) without the pool
+-- wrapper (e.g. patching pins in a post-hook instead) would keep the pins
+-- clean only until PWM's first map or zoom restore, and pins with custom
+-- tooltips would still hover through PWM code, all at the risk of breaking
+-- the custom tooltips. So we tell the user, once per session, that the
+-- message can be ignored. The chat note is kept short on purpose; the details
+-- are here.
+--
+-- hooksecurefunc keeps the calling code secure. SecureHelper looks up the
+-- global DisplayInterfaceActionBlockedMessage at call time, so it reaches our
+-- hook. (Blizzard_ChatFrameBase/Shared replaces that global with a no-op after
+-- its first call, which would drop the hook, but Mainline overrides it with a
+-- counting version that does not.)
+--
+do
+  -- %1$s: Blizzard's localized INTERFACE_ACTION_BLOCKED, the text the user
+  -- just saw in chat.
+  local NOTICE = "|cFF60FF60Persistent World Map:|r The \"%1$s\" message is an unavoidable side effect of PWM in WoW Forever and can be safely ignored."
+
+  if DisplayInterfaceActionBlockedMessage then
+    local noticeShown = false
+    hooksecurefunc("DisplayInterfaceActionBlockedMessage", function()
+      if noticeShown then return end
+      local stack = debugstack(2)
+      if stack:find("SmartNavigation_MarkFrameIgnored", 1, true)
+          and stack:find("QuestLogQuests_Update", 1, true) then
+        noticeShown = true
+        print(NOTICE:format(INTERFACE_ACTION_BLOCKED))
+      end
+    end)
+  end
 end
